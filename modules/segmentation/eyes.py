@@ -10,6 +10,9 @@ def eyes_statistics(stack_statistics, min_area=1000, min_sphericity=0.9):
     return filtered_eyes_stats
 
 def eyes_zrange(eyes_stats, extra_offset_ratio=0.5):
+    if eyes_stats == None:
+        return np.empty((0))
+
     start = eyes_stats['bb_z'].min()
     stop = start + eyes_stats['bb_depth'].max()
     extra_offset = int((stop - start) * extra_offset_ratio)

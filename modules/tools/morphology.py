@@ -37,7 +37,7 @@ def gather_statistics(stack_data, is_inverse=True):
         threshold_val = threshold_otsu(stack_data[slice_idx])
         thresholded_stack[slice_idx] = stack_data[slice_idx] < threshold_val if is_inverse \
                                        else stack_data[slice_idx] >= threshold_val
-        thresholded_stack[slice_idx] = median_filter(thresholded_stack[slice_idx], size=(2,2))
+        thresholded_stack[slice_idx] = median_filter(thresholded_stack[slice_idx], size=(1,1))
 
     stack_statistics = object_counter(thresholded_stack)
 
@@ -59,7 +59,6 @@ def object_counter(stack_binary_data):
 
     print 'Object counting - Stats gathering...'
     for slice_idx in np.arange(labeled_stack.shape[0]):
-        #print "Stats for slice# %d" % slice_idx
 
         for region in regionprops(labeled_stack[slice_idx]):
             objects_stats = objects_stats.append({_measure: region[_measure] \
@@ -104,14 +103,16 @@ def object_counter(stack_binary_data):
 
     return objects_stats
 
-def extract_data_by_label(stack_data, stack_stats, label):
+def extract_data_by_label(stack_data, stack_stats, label, bb_side_offset=0):
     filtered_stats = stack_stats[stack_stats['label'] == label].head(1)
     bbox = BBox(filtered_stats.to_dict('records')[0])
-    return stack_data[bbox.create_tuple()]
+    tuple_bbox = bbox.create_tuple(offset=bb_side_offset)
+    return stack_data[bbox.create_tuple(offset=bb_side_offset)], tuple_bbox
 
-def extract_largest_area_data(stack_data, stack_stats):
+def extract_largest_area_data(stack_data, stack_stats, bb_side_offset=0):
     filtered_stats = stack_stats.sort(['area'], ascending=False).head(1)
-    return extract_data_by_label(stack_data, stack_stats, filtered_stats['label'].values[0])
+    return extract_data_by_label(stack_data, stack_stats, \
+            filtered_stats['label'].values[0], bb_side_offset=bb_side_offset)
 
 def _calc_sphericity(area, perimeter):
     r = ((3.0 * area) / (4.0 * np.pi)) ** (1.0/3.0)

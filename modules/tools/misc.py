@@ -22,10 +22,15 @@ class BBox(object):
             self.height = _input['bb_height']
             self.depth = _input['bb_depth']
 
-    def create_tuple(self):
-        return np.index_exp[self.z:(self.z + self.depth),\
-                            self.y:(self.y + self.height),\
-                            self.x:(self.x + self.width)]
+    def create_tuple(self, offset=0):
+        z_start, z_end = self.z if (self.z - offset) < 0 else (self.z - offset), \
+                          self.z + self.depth + offset
+        y_start, y_end = self.y if (self.y - offset) < 0 else (self.y - offset), \
+                          self.y + self.height + offset
+        x_start, x_end = self.x if (self.x - offset) < 0 else (self.x - offset), \
+                          self.x + self.width + offset
+
+        return np.index_exp[z_start:z_end, y_start:y_end, x_start:x_end]
 
     def __str__(self):
         return 'Origin: (%d, %d, %d) Shape:(%d, %d, %d)' % \

@@ -1,5 +1,6 @@
 from operator import attrgetter
 import numpy as np
+import pandas as pd
 from skimage.filters import threshold_otsu, threshold_li
 from scipy.ndimage.filters import median_filter
 from scipy.ndimage.morphology import binary_dilation, binary_closing, binary_fill_holes
@@ -8,23 +9,13 @@ from skimage.measure import regionprops
 from ..segmentation.eyes import eyes_statistics, eyes_zrange
 from .morphology import gather_statistics
 
-def binarizator(stack_data, filter_size=6, non_zeros_ratio=0.5, preserve_big_objects=True):
+def binarizator(stack_data, eyes_stats=None, filter_size=6, non_zeros_ratio=0.5, preserve_big_objects=True):
     num_slices = stack_data.shape[0]
-
-    #get eyes range
-    print 'Binarizing - Gathering statistics...'
-    stack_statistics, thresholded_stack = gather_statistics(stack_data)
-    #thresholded_stack.tofile("C:\\Users\\Administrator\\Documents\\afs_test_out\\gather_statistics_thresholded_stack.raw")
-    #stack_statistics.to_csv("C:\\Users\\Administrator\\Documents\\afs_test_out\\stack_statistics.csv")
-
-    print 'Binarizing - Filtering eyes\' statistics...'
-    eyes_stats = eyes_statistics(stack_statistics)
-    #eyes_stats.to_csv("C:\\Users\\Administrator\\Documents\\afs_test_out\\eyes_statistics.csv")
-    print eyes_stats
 
     print 'Binarizing - Eye range estimating...'
     eyes_range = eyes_zrange(eyes_stats)
-    print 'Eyes range: %d-%d' % (np.min(eyes_range), np.max(eyes_range))
+    if eyes_range.size:
+        print 'Eyes range: %d-%d' % (np.min(eyes_range), np.max(eyes_range))
 
     #otsu thresholding
     thresholded_stack = np.empty_like(stack_data, dtype=np.uint8)
@@ -37,7 +28,8 @@ def binarizator(stack_data, filter_size=6, non_zeros_ratio=0.5, preserve_big_obj
     print 'Binarizing - Nonzeros, Closing, Filling, Medianing...'
     for slice_idx in np.arange(num_slices):
         #apply more hard thresholding to eyes region
-        if slice_idx in eyes_range:
+
+        if eyes_range.size and slice_idx in eyes_range:
             threshold_global_li = threshold_li(stack_data[slice_idx])
             thresholded_stack[slice_idx] = stack_data[slice_idx] >= threshold_global_li
 
