@@ -100,6 +100,7 @@ if __name__ == "__main__":
     moving_input_path = "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish204\\fish204_rotated_32bit_631x631x1992.raw"
 
     fixed_data_env = DataEnvironment(target_project_path, target_input_path)
+
     moving_data_env = DataEnvironment(moving_project_path, moving_input_path)
 
     crop_align_data(fixed_data_env, moving_data_env)

@@ -99,9 +99,9 @@ class DataEnvironment(object):
             _bits = bits
 
         if _ext == '.raw':
-            shape = tuple(reversed(shape))
+            _shape = tuple(reversed(_shape))
 
-        new_filename = '%s_%dbit_%s%s' % (name, bits, 'x'.join(str(v) for v in shape), ext)
+        new_filename = '%s_%dbit_%s%s' % (_name, _bits, 'x'.join(str(v) for v in _shape), _ext)
 
         return os.path.join(root_path, new_filename)
 
@@ -116,6 +116,17 @@ class DataEnvironment(object):
         out_names['warped'] = self.warped % final_name
 
         return out_names
+
+    def get_input_labels_from_data_path(self):
+        tail, head = os.path.split(self.get_input_path())
+
+        name, _, shape, ext = parse_filename(head)
+
+        new_filename = '%s_labels_%dbit_%s%s' % (name, 8, 'x'.join(str(v) for v in shape), ext)
+
+        self.envs['input_data_labels_path'] = os.path.join(tail, new_filename)
+
+        return self.envs['input_data_labels_path']
 
     def get_extracted_volume_path(self, data_shape):
         self.envs['extracted_input_data_path'] = \
@@ -188,6 +199,7 @@ class DataEnvironment(object):
     def test_paths(self):
         self.set_target_data_path("C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish204\\fish204_32bit_621x621x1800.raw")
         print self.get_input_path()
+        print self.get_input_labels_from_data_path()
         print self.get_extracted_volume_path((320,320,1000))
         print self.get_extracted_volume_niigz_path((320,320,1000))
         print self.get_head_abdomen_volume_paths((300,300,300), (500,500,500))
