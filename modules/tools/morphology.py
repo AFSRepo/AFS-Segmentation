@@ -101,7 +101,7 @@ def object_counter(stack_binary_data):
             objects_stats[_measure_extra] = objects_stats.apply(lambda row: \
                 center_of_mass_labels[int(row['label']) - 1][0], axis=1)
 
-    return objects_stats
+    return objects_stats, labeled_stack
 
 def extract_data_by_label(stack_data, stack_stats, label, bb_side_offset=0):
     filtered_stats = stack_stats[stack_stats['label'] == label].head(1)
@@ -111,6 +111,7 @@ def extract_data_by_label(stack_data, stack_stats, label, bb_side_offset=0):
 
 def extract_largest_area_data(stack_data, stack_stats, bb_side_offset=0):
     filtered_stats = stack_stats.sort(['area'], ascending=False).head(1)
+
     return extract_data_by_label(stack_data, stack_stats, \
             filtered_stats['label'].values[0], bb_side_offset=bb_side_offset)
 

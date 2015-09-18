@@ -5,14 +5,14 @@ import fabio as fb
 import nibabel as nib
 
 def open_data(filepath):
-    name, bits, size, ext = parse_filename(filepath)
-
+    _, glob_ext = os.path.splitext(os.path.basename(filepath))
     data = None
 
-    if ext == '.raw':
+    if glob_ext == '.raw':
+        name, bits, size, ext = parse_filename(filepath)
         data_type = np.float32 if bits == 32 else np.uint8
         data = np.memmap(filepath, dtype=data_type, shape=tuple(reversed(size)))
-    elif ext == '.nii.gz':
+    elif glob_ext == '.nii.gz' or glob_ext == '.nii' or glob_ext == '.gz':
         data = nib.load(filepath).get_data()
     else:
         print 'Incorrent file format, or filename.'
@@ -46,8 +46,11 @@ def get_filename(filepath):
     return os.path.splitext(os.path.basename(filepath))[0]
 
 def parse_filename(filepath):
+    print filepath
     basename, ext = os.path.splitext(os.path.basename(filepath))
+
     comps = basename.split('_')
+    print comps
     size = tuple([int(v) for v in comps[-1:][0].split('x')])
     bits = int(re.findall('\d+', comps[-2:-1][0])[0])
     name = '_'.join(comps[:-2])
