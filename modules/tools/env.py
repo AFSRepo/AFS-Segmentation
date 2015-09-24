@@ -13,6 +13,7 @@ class DataEnvironment(object):
         self.envs['input_data_path'] = input_filepath
         self.envs['target_data_path'] = None
         self.envs['input_data_labels_path'] = None
+        self.envs['input_data_spine_labels_path'] = None
 
         self.envs['filename_ext'] = os.path.basename(input_filepath)
         self.envs['filename_no_ext'] = os.path.splitext(os.path.basename(input_filepath))[0]
@@ -66,6 +67,12 @@ class DataEnvironment(object):
 
     def get_input_labels_path(self):
         return self.envs['input_data_labels_path']
+
+    def set_input_spine_labels_path(self, filepath):
+        self.envs['input_data_spine_labels_path'] = filepath
+
+    def get_input_spine_labels_path(self):
+        return self.envs['input_data_spine_labels_path']
 
     def _get_ants_output_names(self, fixed_image_name, fixed_image_size, moving_image_name, moving_image_size, phase_name):
         final_name = '%s_%s_%sTO%s_%s' % (phase_name, moving_image_name, moving_image_size, fixed_image_name, fixed_image_size)

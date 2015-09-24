@@ -39,7 +39,7 @@ def gather_statistics(stack_data, is_inverse=True):
                                        else stack_data[slice_idx] >= threshold_val
         thresholded_stack[slice_idx] = median_filter(thresholded_stack[slice_idx], size=(1,1))
 
-    stack_statistics = object_counter(thresholded_stack)
+    stack_statistics, _ = object_counter(thresholded_stack)
 
     return stack_statistics, thresholded_stack
 

@@ -96,6 +96,7 @@ if __name__ == "__main__":
     target_project_path = "C:\\Users\\Administrator\\Documents\\AFS-Segmentation\\fish202"
     target_input_path = "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish202\\fish202_aligned_32bit_640x640x1996.raw"
     target_input_labels_path = "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish202\\fish202_aligned_labels_8bit_640x640x1996.raw"
+    target_input_spine_labels_path = "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish202\\fish202_aligned_spine_labels_8bit_640x640x1996.raw"
 
     moving_project_path = "C:\\Users\\Administrator\\Documents\\AFS-Segmentation\\fish204"
     moving_input_path = "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish204\\fish204_rotated_32bit_631x631x1992.raw"
@@ -104,8 +105,9 @@ if __name__ == "__main__":
     moving_data_env = DataEnvironment(moving_project_path, moving_input_path)
 
     fixed_data_env.set_input_labels_path(target_input_labels_path)
+    fixed_data_env.set_input_spine_labels_path(target_input_spine_labels_path)
     fixed_data_env.set_target_data_path(moving_input_path)
-    
+
     moving_data_env.set_target_data_path(target_input_path)
 
     crop_align_data(fixed_data_env, moving_data_env)

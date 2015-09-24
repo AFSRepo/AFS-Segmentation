@@ -22,6 +22,9 @@ def produce_cropped_data(data_env):
     ext_volume_labels_niigz_path = None
     zoomed_ext_volume_labels_niigz_path = None
 
+    ext_volume_spine_labels_niigz_path = None
+    zoomed_ext_volume_spine_labels_niigz_path = None
+
     if not data_env.is_entry_exists(phase_name):
         t = Timer()
 
@@ -61,6 +64,28 @@ def produce_cropped_data(data_env):
                 ext_volume_labels.tofile(ext_volume_labels_path)
                 zoomed_0p5_ext_volume_labels.tofile(zoomed_ext_volume_labels_path)
 
+                print "Abdomen and brain labels are written and zoomed"
+
+            if data_env.get_input_spine_labels_path():
+                input_data_spine_labels = open_data(data_env.get_input_spine_labels_path())
+
+                ext_volume_spine_labels = input_data_spine_labels[bbox]
+                zoomed_0p5_ext_volume_spine_labels = zoom(ext_volume_spine_labels, 0.5, order=0)
+
+                ext_volume_spine_labels_path = data_env.get_new_volume_labels_path(ext_volume_spine_labels.shape, 'extracted_spine')
+                ext_volume_spine_labels_niigz_path = data_env.get_new_volume_labels_niigz_path(ext_volume_spine_labels.shape, 'extracted_spine')
+
+                zoomed_ext_volume_spine_labels_path = data_env.get_new_volume_labels_path(zoomed_0p5_ext_volume_spine_labels.shape, 'zoomed_0p5_extracted_spine')
+                zoomed_ext_volume_spine_labels_niigz_path = data_env.get_new_volume_labels_niigz_path(zoomed_0p5_ext_volume_spine_labels.shape, 'zoomed_0p5_extracted_spine')
+
+                save_as_nifti(ext_volume_spine_labels, ext_volume_spine_labels_niigz_path)
+                save_as_nifti(zoomed_0p5_ext_volume_spine_labels, zoomed_ext_volume_spine_labels_niigz_path)
+
+                ext_volume_spine_labels.tofile(ext_volume_spine_labels_path)
+                zoomed_0p5_ext_volume_spine_labels.tofile(zoomed_ext_volume_spine_labels_path)
+
+                print "Spine labels are written and zoomed"
+
         else:
             print 'There\'s no input data'
 
@@ -71,13 +96,17 @@ def produce_cropped_data(data_env):
         print 'Files of \'%s\' phase are already in working directory: %s' % (phase_name, data_env.get_working_path())
 
     return {'scaled_0p5_extracted': zoomed_ext_volume_niigz_path, 'extracted': ext_volume_niigz_path, \
-            'scaled_0p5_extracted_labels': zoomed_ext_volume_labels_niigz_path, 'extracted_labels': ext_volume_labels_niigz_path}
+            'scaled_0p5_extracted_labels': zoomed_ext_volume_labels_niigz_path, 'extracted_labels': ext_volume_labels_niigz_path, \
+            'scaled_0p5_extracted_spine_labels': zoomed_ext_volume_spine_labels_niigz_path, 'extracted_spine_labels': ext_volume_spine_labels_niigz_path}
 
 def crop_align_data(fixed_data_env, moving_data_env):
+    use_full_size = True
+
     fixed_data_env.load()
     moving_data_env.load()
 
     # Crop the raw data
+    print "Extracting net volumes"
     fixed_data_results = produce_cropped_data(fixed_data_env)
     moving_data_results = produce_cropped_data(moving_data_env)
 
@@ -87,6 +116,7 @@ def crop_align_data(fixed_data_env, moving_data_env):
     #generate_stats(fixed_data_env)
     #generate_stats(moving_data_env)
 
+    print "Pre-alignment of the unknown fish to the known one"
     # Pre-alignment fish1 to fish_aligned
     ants_prefix_prealign = 'pre_alignment'
     ants_prealign_paths = moving_data_env.get_aligned_data_paths(ants_prefix_prealign)
@@ -110,6 +140,33 @@ def crop_align_data(fixed_data_env, moving_data_env):
     else:
         print "Data is already prealigned"
 
+    print "Pre-alignment of the unknown fish to the known one (Full size)"
+    # Pre-alignment fish1 to fish_aligned
+    ants_prefix_prealign_full = 'pre_alignment_full'
+    ants_prealign_paths_full = moving_data_env.get_aligned_data_paths(ants_prefix_prealign_full)
+    ants_prealign_names_full = moving_data_env.get_aligned_data_paths(ants_prefix_prealign_full, produce_paths=False)
+
+    working_env_prealign_full = moving_data_env
+    fixed_image_path_prealign_full = fixed_data_env.envs['extracted_input_data_path_niigz']
+    fixed_image_path_prealign_raw_full = fixed_data_env.envs['extracted_input_data_path']
+    moving_image_path_prealign_full = moving_data_env.envs['extracted_input_data_path_niigz']
+    output_name_prealign_full = ants_prealign_names_full['out_name']
+    warped_path_prealign_full = ants_prealign_paths_full['warped']
+    iwarped_path_prealign_full = ants_prealign_paths_full['iwarp']
+
+    if use_full_size:
+        if not os.path.exists(warped_path_prealign_full):
+            align_fish(working_env_prealign_full, fixed_image_path_prealign_full, moving_image_path_prealign_full, \
+                        output_name_prealign_full, warped_path_prealign_full, iwarped_path_prealign_full, reg_prefix=ants_prefix_prealign_full, \
+                        syn_big_data_case=2)
+
+
+            fixed_data_env.save()
+            moving_data_env.save()
+        else:
+            print "Data is already prealigned (Full size)"
+
+    print  "Registration of the known fish to the unknown one"
     # Registration of fish_aligned to fish1
     ants_prefix_sep = 'parts_separation'
     ants_separation_paths = fixed_data_env.get_aligned_data_paths(ants_prefix_sep)
@@ -130,12 +187,12 @@ def crop_align_data(fixed_data_env, moving_data_env):
     else:
         print "Data is already registered for separation"
 
+    print "Transforming brain and abdomen labels of the known fish to the unknown's one"
     # Transforming labels of fish_aligned to fish1
     wokring_env_tr = moving_data_env
     ref_image_path_tr = ants_prealign_paths['warped']
     transformation_path_tr = ants_separation_paths['gen_affine']
     labels_image_path_tr = fixed_data_env.envs['zoomed_0p5_extracted_input_data_labels_path_niigz']
-    test_data = open_data(fixed_image_path_prealign_raw)
 
     __, __, new_size, __ = parse_filename(fixed_image_path_prealign_raw)
 
@@ -148,7 +205,27 @@ def crop_align_data(fixed_data_env, moving_data_env):
         fixed_data_env.save()
         moving_data_env.save()
     else:
-        print "Data is already transformed"
+        print "Abdomen and brain data is already transformed"
+
+    print "Transforming spin labels of the known fish to the unknown's one"
+    # Transforming spin labels of the known fish to the unknown's one
+    wokring_env_spine_tr = moving_data_env
+    ref_image_path_spine_tr = ants_prealign_paths['warped']
+    transformation_path_spine_tr = ants_separation_paths['gen_affine']
+    labels_image_path_spine_tr = fixed_data_env.envs['zoomed_0p5_extracted_spine_input_data_labels_path_niigz']
+
+    __, __, new_size_spine, __ = parse_filename(fixed_image_path_prealign_raw)
+
+    transformation_output_spine_tr = moving_data_env.get_new_volume_niigz_path(new_size_spine, 'zoomed_0p5_extracted_spine_labels', bits=8)
+    reg_prefix_spine_tr = 'spine_label_deforming'
+
+    if not os.path.exists(transformation_output_spine_tr):
+        apply_transform_fish(wokring_env_spine_tr, ref_image_path_spine_tr, transformation_path_spine_tr, labels_image_path_spine_tr, transformation_output_spine_tr, reg_prefix=reg_prefix_spine_tr)
+
+        fixed_data_env.save()
+        moving_data_env.save()
+    else:
+        print "Spine data is already transformed"
 
     #Separate head and tail of fixed image
     print "Fish separation (Fixed image)..."
@@ -182,6 +259,27 @@ def crop_align_data(fixed_data_env, moving_data_env):
 
     fixed_data_env.save()
 
+    print "Fish's spine separation (Fixed image)..."
+    #Separate spine of tail region of fixed image from head
+    aligned_data_spine_fixed = open_data(fixed_image_path_prealign)
+    aligned_data_spine_labels_fixed = open_data(labels_image_path_spine_tr)
+
+    spine_data_part_fixed, _ = split_fish_by_pos(aligned_data_spine_fixed, separation_pos_fixed, overlap=20)
+    spine_label_fixed, _ = split_fish_by_pos(aligned_data_spine_labels_fixed, separation_pos_fixed, overlap=20)
+
+    spine_data_part_fixed_niigz_path = fixed_data_env.get_new_volume_niigz_path(spine_data_part_fixed.shape, 'zoomed_0p5_spine')
+    if not os.path.exists(spine_data_part_fixed_niigz_path):
+        save_as_nifti(spine_data_part_fixed, spine_data_part_fixed_niigz_path)
+
+    spine_data_part_labels_fixed_niigz_path = fixed_data_env.get_new_volume_niigz_path(spine_label_fixed.shape, 'zoomed_0p5_spine_labels')
+    if not os.path.exists(spine_data_part_labels_fixed_niigz_path):
+        save_as_nifti(spine_label_fixed, spine_data_part_labels_fixed_niigz_path)
+
+    print spine_data_part_fixed_niigz_path
+    print spine_data_part_labels_fixed_niigz_path
+
+    fixed_data_env.save()
+
     #Separate head and tail of moving image
     print "Fish separation (Moving image)..."
     aligned_data_moving = open_data(ants_prealign_paths['warped'])
@@ -211,6 +309,26 @@ def crop_align_data(fixed_data_env, moving_data_env):
 
     print abdomen_data_part_labels_moving_niigz_path
     print head_data_part_labels_moving_niigz_path
+
+    moving_data_env.save()
+
+    print "Fish's spine separation (Moving image)..."
+    aligned_data_spine_moving = open_data(ants_prealign_paths['warped'])
+    aligned_data_spine_labels_moving = open_data(transformation_output_spine_tr)
+
+    spine_data_part_moving, _ = split_fish_by_pos(aligned_data_spine_moving, separation_pos_moving, overlap=20)
+    spine_label_moving, _ = split_fish_by_pos(aligned_data_spine_labels_moving, separation_pos_moving, overlap=20)
+
+    spine_data_part_moving_niigz_path = moving_data_env.get_new_volume_niigz_path(spine_data_part_moving.shape, 'zoomed_0p5_spine')
+    if not os.path.exists(spine_data_part_moving_niigz_path):
+        save_as_nifti(spine_data_part_moving, spine_data_part_moving_niigz_path)
+
+    spine_data_part_labels_moving_niigz_path = moving_data_env.get_new_volume_niigz_path(spine_label_moving.shape, 'zoomed_0p5_spine_labels')
+    if not os.path.exists(spine_data_part_labels_moving_niigz_path):
+        save_as_nifti(spine_label_moving, spine_data_part_labels_moving_niigz_path)
+
+    print spine_data_part_moving_niigz_path
+    print spine_data_part_labels_moving_niigz_path
 
     moving_data_env.save()
 
@@ -365,6 +483,25 @@ def crop_align_data(fixed_data_env, moving_data_env):
     else:
         print "Abdomen data is already transformed"
 
+    print "Transfrom labels of known fish's spine of abdomen into the unknown's one..."
+    # Transforming labels of abdomen of fixed fish to the abdomen of moving one
+    wokring_env_abdomen_spine_tr = moving_data_env
+    ref_image_path_abdomen_spine_tr = abdomen_data_part_moving_niigz_path
+    transformation_path_abdomen_spine_tr = ants_abdomen_reg_paths['gen_affine']
+    labels_image_path_abdomen_spine_tr = spine_data_part_labels_fixed_niigz_path
+    test_data_abdomen_spine_tr = open_data(ref_image_path_abdomen_spine_tr)
+    transformation_output_abdomen_spine_tr = moving_data_env.get_new_volume_niigz_path(test_data_abdomen_spine_tr.shape, 'zoomed_0p5_abdomen_spine_labels', bits=8)
+    reg_prefix_abdomen_spine_tr= 'abdomen_spine_label_deforming'
+
+    if not os.path.exists(transformation_output_abdomen_spine_tr):
+        apply_transform_fish(wokring_env_abdomen_spine_tr, ref_image_path_abdomen_spine_tr, transformation_path_abdomen_spine_tr, \
+                             labels_image_path_abdomen_spine_tr, transformation_output_abdomen_spine_tr, reg_prefix=reg_prefix_abdomen_spine_tr)
+
+        fixed_data_env.save()
+        moving_data_env.save()
+    else:
+        print "Abdomen spine data is already transformed"
+
     print "Extract the unknown fish's abdomen using transformed abdomen labels..."
     # Extract moving abdomen volume
     abdomen_label_moving = open_data(transformation_output_abdomen_tr)
@@ -436,6 +573,76 @@ def crop_align_data(fixed_data_env, moving_data_env):
     else:
         print "The guts of the fixed abdomen data is already transformed"
 
+    print "Extract the unknown fish's abdomen spine using transformed abdomen spine labels..."
+    # Extract moving abdomen spine volume
+    abdomen_spine_label_moving = open_data(transformation_output_abdomen_spine_tr)
+    abdomen_spine_data_moving = open_data(ref_image_path_abdomen_spine_tr)
+    abdomen_spine_volume_moving, _ = extract_largest_volume_by_label(abdomen_spine_data_moving, abdomen_spine_label_moving, bb_side_offset=5)
+    abdomen_spine_volume_moving_niigz_path = moving_data_env.get_new_volume_niigz_path(abdomen_spine_volume_moving.shape, 'zoomed_0p5_abdomen_spine_extracted')
+
+    print abdomen_spine_volume_moving_niigz_path
+
+    if not os.path.exists(abdomen_spine_volume_moving_niigz_path):
+        save_as_nifti(abdomen_spine_volume_moving, abdomen_spine_volume_moving_niigz_path)
+
+    print "Extract the known fish's abdomen spine using labels..."
+    # Extract fixed abdomen spine volume
+    abdomen_spine_label_fixed = open_data(labels_image_path_abdomen_spine_tr)
+    abdomen_spine_data_fixed = open_data(moving_image_path_abdomen_reg)
+    abdomen_spine_volume_fixed, abdomen_spine_fixed_bbox = extract_largest_volume_by_label(abdomen_spine_data_fixed, abdomen_spine_label_fixed, bb_side_offset=5)
+    abdomen_spine_labels_volume_fixed = abdomen_spine_label_fixed[abdomen_spine_fixed_bbox]
+
+    abdomen_spine_volume_fixed_niigz_path = fixed_data_env.get_new_volume_niigz_path(abdomen_spine_volume_fixed.shape, 'zoomed_0p5_abdomen_spine_extracted')
+    abdomen_spine_labels_volume_fixed_niigz_path = fixed_data_env.get_new_volume_niigz_path(abdomen_spine_labels_volume_fixed.shape, 'zoomed_0p5_abdomen_spine_extracted_labels')
+
+    print abdomen_spine_volume_fixed_niigz_path
+    print abdomen_spine_labels_volume_fixed_niigz_path
+
+    if not os.path.exists(abdomen_spine_volume_fixed_niigz_path):
+        save_as_nifti(abdomen_spine_volume_fixed, abdomen_spine_volume_fixed_niigz_path)
+
+    if not os.path.exists(abdomen_spine_labels_volume_fixed_niigz_path):
+        save_as_nifti(abdomen_spine_labels_volume_fixed, abdomen_spine_labels_volume_fixed_niigz_path)
+
+    print "Register the known fish's abdomen spine to the unknown's one..."
+    # Register the fixed abdomen spine to the moving one
+    ants_prefix_abdomen_spine_reg = 'abdomen_spine_registration'
+    ants_abdomen_spine_reg_paths = fixed_data_env.get_aligned_data_paths(ants_prefix_abdomen_spine_reg)
+    working_env_abdomen_spine_reg = fixed_data_env
+    fixed_image_path_abdomen_spine_reg = abdomen_spine_volume_moving_niigz_path
+    moving_image_path_abdomen_spine_reg = abdomen_spine_volume_fixed_niigz_path
+    output_name_abdomen_spine_reg = ants_abdomen_spine_reg_paths['out_name']
+    warped_path_abdomen_spine_reg = ants_abdomen_spine_reg_paths['warped']
+    iwarped_path_abdomen_spine_reg = ants_abdomen_spine_reg_paths['iwarp']
+
+    if not os.path.exists(warped_path_abdomen_spine_reg):
+        align_fish(working_env_abdomen_spine_reg, fixed_image_path_abdomen_spine_reg, moving_image_path_abdomen_spine_reg, \
+                   output_name_abdomen_spine_reg, warped_path_abdomen_spine_reg, iwarped_path_abdomen_spine_reg, \
+                   reg_prefix=ants_prefix_abdomen_spine_reg, use_syn=True, small_volume=True)
+
+        fixed_data_env.save()
+        moving_data_env.save()
+    else:
+        print "The spine of the abdomen of the fixed data is already registered to the spine of the abdomen of moving one"
+
+    print "Transform the known fish's abdomen spine labels into the unknown's one..."
+    # Transforming labels of the spine of abdomen of fixed fish to the spine of the abdomen of moving one
+    wokring_env_abdomen_spine_tr = moving_data_env
+    ref_image_path_abdomen_spine_tr = abdomen_spine_volume_moving_niigz_path
+    transformation_path_abdomen_spine_tr = ants_abdomen_spine_reg_paths['gen_affine']
+    labels_image_path_abdomen_spine_tr = abdomen_spine_labels_volume_fixed_niigz_path
+    test_data_abdomen_spine_tr = open_data(ref_image_path_abdomen_spine_tr)
+    transformation_output_abdomen_spine_tr = moving_data_env.get_new_volume_niigz_path(test_data_abdomen_spine_tr.shape, 'zoomed_0p5_abdomen_spine_extracted_labels', bits=8)
+    reg_prefix_abdomen_spine_tr = 'abdomen_spine_label_deforming'
+
+    if not os.path.exists(transformation_output_abdomen_spine_tr):
+        apply_transform_fish(wokring_env_abdomen_spine_tr, ref_image_path_abdomen_spine_tr, transformation_path_abdomen_spine_tr,\
+                             labels_image_path_abdomen_spine_tr, transformation_output_abdomen_spine_tr, reg_prefix=reg_prefix_abdomen_spine_tr)
+
+        fixed_data_env.save()
+        moving_data_env.save()
+    else:
+        print "The spine of the fixed abdomen data is already transformed"
 
 def extract_largest_volume_by_label(stack_data, stack_labels, bb_side_offset=0):
     stack_stats, _ = object_counter(stack_labels)
@@ -453,7 +660,7 @@ def extract_effective_volume(stack_data, eyes_stats=None, bb_side_offset=0):
 
     timer = Timer()
     print 'Object counting...'
-    binary_stack_stats = object_counter(binarized_stack)
+    binary_stack_stats, _ = object_counter(binarized_stack)
     timer.elapsed('Object counting')
 
     timer = Timer()
@@ -503,7 +710,7 @@ def generate_stats(data_env):
     else:
         print "Eyes statistics is already gathered: %s" % data_env.envs[eyes_stats]
 
-def align_fish(working_env, fixed_image_path, moving_image_path, output_name, warped_path, iwarped_path, reg_prefix=None, use_syn=False, small_volume=False):
+def align_fish(working_env, fixed_image_path, moving_image_path, output_name, warped_path, iwarped_path, reg_prefix=None, use_syn=False, small_volume=False, syn_big_data_case=1):
 
     working_path = working_env.get_working_path()
     os.environ["ANTSPATH"] = working_env.ANTSPATH
@@ -516,7 +723,10 @@ def align_fish(working_env, fixed_image_path, moving_image_path, output_name, wa
         app = 'antsRegistration --dimensionality 3 --float 1 --output [{out_name},{warped_path},{iwarped_path}] --interpolation BSpline --use-histogram-matching 0 --initial-moving-transform [{fixedImagePath},{movingImagePath},1] --transform Rigid[0.01] --metric MI[{fixedImagePath},{movingImagePath},1,32,Regular,0.25] --convergence [1000x500x250x10,1e-8,10] --shrink-factors 12x8x4x2 --smoothing-sigmas 4x3x2x1vox'.format(**args_fmt)
     else:
         if not small_volume:
-            app = 'antsRegistration --dimensionality 3 --float 1 --output [{out_name},{warped_path},{iwarped_path}] --interpolation BSpline --use-histogram-matching 0 --initial-moving-transform [{fixedImagePath},{movingImagePath},1] --transform Rigid[0.1] --metric MI[{fixedImagePath},{movingImagePath},1,32,Regular,0.25] --convergence [1000x500x250x100,1e-6,10] --shrink-factors 12x8x4x2 --smoothing-sigmas 4x3x2x1vox --transform Affine[0.1] --metric MI[{fixedImagePath},{movingImagePath},1,32,Regular,0.25] --convergence [1000x500x250x100,1e-6,10] --shrink-factors 12x8x4x2 --smoothing-sigmas 4x3x2x1vox --transform SyN[0.1,3,0] --metric CC[{fixedImagePath},{movingImagePath},1,10] --metric MI[{fixedImagePath},{movingImagePath},1,32,Regular,0.25] --convergence [200x200x200x20x0,1e-6,10] --shrink-factors 8x6x4x2x1 --smoothing-sigmas 4x3x2x1x0vox'.format(**args_fmt)
+            if syn_big_data_case == 1:
+                app = 'antsRegistration --dimensionality 3 --float 1 --output [{out_name},{warped_path},{iwarped_path}] --interpolation BSpline --use-histogram-matching 0 --initial-moving-transform [{fixedImagePath},{movingImagePath},1] --transform Rigid[0.1] --metric MI[{fixedImagePath},{movingImagePath},1,32,Regular,0.25] --convergence [1000x500x250x100,1e-6,10] --shrink-factors 12x8x4x2 --smoothing-sigmas 4x3x2x1vox --transform Affine[0.1] --metric MI[{fixedImagePath},{movingImagePath},1,32,Regular,0.25] --convergence [1000x500x250x100,1e-6,10] --shrink-factors 12x8x4x2 --smoothing-sigmas 4x3x2x1vox --transform SyN[0.1,3,0] --metric CC[{fixedImagePath},{movingImagePath},1,10] --metric MI[{fixedImagePath},{movingImagePath},1,32,Regular,0.25] --convergence [200x200x200x20x0,1e-6,10] --shrink-factors 8x6x4x2x1 --smoothing-sigmas 4x3x2x1x0vox'.format(**args_fmt)
+            elif syn_big_data_case == 2:
+                app = 'antsRegistration --dimensionality 3 --float 1 --output [{out_name},{warped_path},{iwarped_path}] --interpolation BSpline --use-histogram-matching 0 --initial-moving-transform [{fixedImagePath},{movingImagePath},1] --transform Rigid[0.1] --metric MI[{fixedImagePath},{movingImagePath},1,32,Regular,0.25] --convergence [1000x500x250x100,1e-6,10] --shrink-factors 12x8x4x2 --smoothing-sigmas 4x3x2x1vox --transform Affine[0.1] --metric MI[{fixedImagePath},{movingImagePath},1,32,Regular,0.25] --convergence [1000x500x250x100,1e-6,10] --shrink-factors 12x8x4x2 --smoothing-sigmas 4x3x2x1vox --transform SyN[0.25,3,1] --metric CC[{fixedImagePath},{movingImagePath},1,4] --convergence [400x200x50x10x0,1e-6,10] --shrink-factors 6x5x4x3x2x1 --smoothing-sigmas 5x4x3x2x1x0vox'.format(**args_fmt)
         else:
             app = 'antsRegistration --dimensionality 3 --float 1 --output [{out_name},{warped_path},{iwarped_path}] --interpolation BSpline --use-histogram-matching 0 --initial-moving-transform [{fixedImagePath},{movingImagePath},1] --transform Rigid[0.1] --metric MI[{fixedImagePath},{movingImagePath},1,32,Regular,0.25] --convergence [1000x500x250x100,1e-6,10] --shrink-factors 12x8x4x2 --smoothing-sigmas 4x3x2x1vox --transform Affine[0.1] --metric MI[{fixedImagePath},{movingImagePath},1,32,Regular,0.25] --convergence [1000x500x250x100,1e-6,10] --shrink-factors 12x8x4x2 --smoothing-sigmas 4x3x2x1vox --transform SyN[0.1,3,0] --metric CC[{fixedImagePath},{movingImagePath},1,10] --metric MI[{fixedImagePath},{movingImagePath},1,32,Regular,0.25] --convergence [200x150x20x5,1e-6,10] --shrink-factors 6x4x2x1 --smoothing-sigmas 3x2x1x0vox'.format(**args_fmt)
 
@@ -557,7 +767,7 @@ def split_fish_by_pos(stack_data, separation_pos, overlap=1):
 
 def split_fish(stack_data, stack_labels):
     #get bounding boxes of abdom and head parts
-    objects_stats = object_counter(stack_labels)
+    objects_stats, _ = object_counter(stack_labels)
     objects_stats = objects_stats.sort(['area'], ascending=False)
 
     abdomen_part_z = objects_stats.loc[0, 'bb_z'] + objects_stats.loc[0, 'bb_depth']
