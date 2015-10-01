@@ -27,8 +27,17 @@ _MEASUREMENTS_EXTRA = {
     'Center of mass Z': 'com_z'
 }
 
+_MEASUREMENTS_EXTRA_2D = {
+    'Slice Index': 'slice_idx',
+    'Circularity': 'circularity',
+    'Center of mass Y': 'com_y',
+    'Center of mass Z': 'com_z'
+}
+
 _MEASUREMENTS_VALS = _MEASUREMENTS.values()
+
 _MEASUREMENTS_EXTRA_VALS = _MEASUREMENTS_EXTRA.values()
+_MEASUREMENTS_EXTRA_VALS_2D = _MEASUREMENTS_EXTRA_2D.values()
 
 def gather_statistics(stack_data, is_inverse=True):
     thresholded_stack = np.empty_like(stack_data, dtype=np.uint8)
@@ -45,7 +54,7 @@ def gather_statistics(stack_data, is_inverse=True):
 
 def object_counter(stack_binary_data):
     #labeled_stack, num_labels = label(stack_binary_data, \
-    #                                  structure=generate_binary_structure(3,3))
+    #                                  structure=generate_binary_structure(3,3))\
     print 'Object counting - Labeling...'
     labeled_stack, num_labels = label(stack_binary_data)
 
@@ -59,11 +68,10 @@ def object_counter(stack_binary_data):
 
     print 'Object counting - Stats gathering...'
     for slice_idx in np.arange(labeled_stack.shape[0]):
-
         for region in regionprops(labeled_stack[slice_idx]):
             objects_stats = objects_stats.append({_measure: region[_measure] \
-                                    for _measure in _MEASUREMENTS_VALS}, \
-                                        ignore_index=True)
+                                        for _measure in _MEASUREMENTS_VALS}, \
+                                            ignore_index=True)
 
     objects_stats = objects_stats.groupby('label', as_index=False).sum()
 
@@ -103,6 +111,50 @@ def object_counter(stack_binary_data):
 
     return objects_stats, labeled_stack
 
+def cell_counter(slice_binary_data, min_area=0.0, min_circularity=0.0, slice_index=-1):
+    print 'Object counting - Labeling...'
+    labeled_data, num_labels = label(slice_binary_data)
+
+    print 'Object counting - BBoxing...'
+    bboxes_labels = [BBox(bb_obj) for bb_obj in find_objects(labeled_data)]
+
+    print 'Object counting - Centers of masses...'
+    center_of_mass_labels = center_of_mass(slice_binary_data, labeled_data, np.arange(1, num_labels+1))
+
+    objects_stats = pd.DataFrame(columns=_MEASUREMENTS_VALS)
+
+    for region in regionprops(labeled_data):
+        objects_stats = objects_stats.append({_measure: region[_measure] \
+                            for _measure in _MEASUREMENTS_VALS}, \
+                                ignore_index=True)
+
+    print 'Object counting - Extra stats gathering...'
+    for _measure_extra in _MEASUREMENTS_EXTRA_VALS_2D:
+        if _measure_extra == 'circularity':
+            objects_stats[_measure_extra] = objects_stats.apply(lambda row: \
+                0.0 if row['perimeter'] == 0 else
+                    _calc_circularity(row['area'], row['perimeter']), axis=1)
+        elif _measure_extra == 'com_y':
+            objects_stats[_measure_extra] = objects_stats.apply(lambda row: \
+                center_of_mass_labels[int(row['label']) - 1][1], axis=1)
+        elif _measure_extra == 'com_z':
+            objects_stats[_measure_extra] = objects_stats.apply(lambda row: \
+                center_of_mass_labels[int(row['label']) - 1][0], axis=1)
+        elif _measure_extra == 'slice_idx':
+            objects_stats[_measure_extra] = slice_index
+
+    filtered_stats = objects_stats
+
+#    if min_area != 0.0 or min_circularity != 0.0:
+#        print "FIUIII!!!"
+#        filtered_stats_neg = objects_stats[(objects_stats['area'] <= min_area) | (objects_stats['circularity'] <= min_circularity)]
+#        filtered_stats = objects_stats[(objects_stats['area'] > min_area) & (objects_stats['circularity'] > min_circularity)]
+#
+#        for idx, row in filtered_stats_neg.iterrows():
+#            labeled_data[labeled_data == row['label']] = 0.0
+
+    return filtered_stats, labeled_data
+
 def extract_data_by_label(stack_data, stack_stats, label, bb_side_offset=0):
     filtered_stats = stack_stats[stack_stats['label'] == label].head(1)
     bbox = BBox(filtered_stats.to_dict('records')[0])
@@ -119,3 +171,6 @@ def _calc_sphericity(area, perimeter):
     r = ((3.0 * area) / (4.0 * np.pi)) ** (1.0/3.0)
 
     return (4.0 * np.pi * (r*r)) / perimeter
+
+def _calc_circularity(area, perimeter):
+    return 4.0 * np.pi * area / (perimeter * perimeter)
