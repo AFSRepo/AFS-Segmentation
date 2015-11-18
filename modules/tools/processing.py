@@ -69,6 +69,8 @@ def binarizator(stack_data, eyes_stats=None, filter_size=6, non_zeros_ratio=0.5,
 
     bbox = find_objects(thresholded_stack)
 
+    print "thresholded_stack = %s" % str(thresholded_stack.shape)
+
     return thresholded_stack, bbox, eyes_stats
 
 def _check_slice_position(slice_idx, num_slices, slice_threshold_ratio=0.2):

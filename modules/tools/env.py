@@ -1,10 +1,15 @@
 import os
 import csv
+import pickle
 from .io import parse_filename, create_filename_with_shape, create_filename_with_bits
+
+class NoneDict(dict):
+    def __getitem__(self, key):
+        return dict.get(self, key, '')
 
 class DataEnvironment(object):
     def __init__(self, project_path, input_filepath):
-        self.envs = dict()
+        self.envs = NoneDict()
         self.envs['project_path'] = project_path
 
         if not os.path.exists(self.envs['project_path']):
@@ -47,8 +52,12 @@ class DataEnvironment(object):
         return False
 
     def _get_cache_path(self):
-        return os.path.join(self.envs['project_temp_path'], \
-                            "env_%s.csv" % self.envs['filename_no_ext'])
+        if self.get_target_path():
+            return os.path.join(self.envs['project_temp_path'], \
+                                "env_%s_to_%s.csv" % (self.envs['filename_no_ext'], os.path.splitext(os.path.basename(self.envs['target_data_path']))[0]))
+        else:
+            return os.path.join(self.envs['project_temp_path'], \
+                                "env_%s.csv" % self.envs['filename_no_ext'])
 
     def get_working_path(self):
         return self.envs['project_temp_path']
@@ -61,6 +70,12 @@ class DataEnvironment(object):
 
     def get_target_path(self):
         return self.envs['target_data_path']
+
+    def set_effective_volume_bbox(self, bbox):
+        self.envs['effective_volume_bbox'] = pickle.dumps(bbox)
+
+    def get_effective_volume_bbox(self):
+        return pickle.loads(self.envs['effective_volume_bbox']) if self.envs['effective_volume_bbox'] else None
 
     def set_input_labels_path(self, filepath):
         self.envs['input_data_labels_path'] = filepath

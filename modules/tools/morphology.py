@@ -31,7 +31,11 @@ _MEASUREMENTS_EXTRA_2D = {
     'Slice Index': 'slice_idx',
     'Circularity': 'circularity',
     'Center of mass Y': 'com_y',
-    'Center of mass Z': 'com_z'
+    'Center of mass Z': 'com_z',
+    'Bounding box Y': 'bb_y',
+    'Bounding box Z': 'bb_z',
+    'Bounding box Height': 'bb_height',
+    'Bounding box Depth': 'bb_depth'
 }
 
 _MEASUREMENTS_VALS = _MEASUREMENTS.values()
@@ -140,8 +144,21 @@ def cell_counter(slice_binary_data, min_area=0.0, min_circularity=0.0, slice_ind
         elif _measure_extra == 'com_z':
             objects_stats[_measure_extra] = objects_stats.apply(lambda row: \
                 center_of_mass_labels[int(row['label']) - 1][0], axis=1)
+        elif _measure_extra == 'bb_y':
+            objects_stats[_measure_extra] = objects_stats.apply(lambda row: \
+                bboxes_labels[int(row['label']) - 1].y, axis=1)
+        elif _measure_extra == 'bb_height':
+            objects_stats[_measure_extra] = objects_stats.apply(lambda row: \
+                bboxes_labels[int(row['label']) - 1].height, axis=1)
+        elif _measure_extra == 'bb_z':
+            objects_stats[_measure_extra] = objects_stats.apply(lambda row: \
+                bboxes_labels[int(row['label']) - 1].z, axis=1)
+        elif _measure_extra == 'bb_depth':
+            objects_stats[_measure_extra] = objects_stats.apply(lambda row: \
+                bboxes_labels[int(row['label']) - 1].depth, axis=1)
         elif _measure_extra == 'slice_idx':
             objects_stats[_measure_extra] = slice_index
+
 
     filtered_stats = objects_stats
 
@@ -157,8 +174,12 @@ def cell_counter(slice_binary_data, min_area=0.0, min_circularity=0.0, slice_ind
 
 def extract_data_by_label(stack_data, stack_stats, label, bb_side_offset=0):
     filtered_stats = stack_stats[stack_stats['label'] == label].head(1)
+    print "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@ CHECK extract_data_by_label"
     bbox = BBox(filtered_stats.to_dict('records')[0])
-    tuple_bbox = bbox.create_tuple(offset=bb_side_offset)
+    tuple_bbox = bbox.create_tuple(offset=bb_side_offset, max_ranges=stack_data.shape)
+    print "INPUT extract_data_by_label = %s" % str(stack_data.shape)
+    print "BBOX extract_data_by_label = %s" % str(tuple_bbox)
+
     return stack_data[bbox.create_tuple(offset=bb_side_offset)], tuple_bbox
 
 def extract_largest_area_data(stack_data, stack_stats, bb_side_offset=0):

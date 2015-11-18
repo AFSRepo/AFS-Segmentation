@@ -1,7 +1,9 @@
 import numpy as np
 import pandas as pd
 import os
+import sys
 from skimage.filters import threshold_adaptive
+from skimage.draw import circle
 from scipy.ndimage.morphology import binary_opening, binary_fill_holes, binary_closing, generate_binary_structure
 from modules.tools.morphology import cell_counter, gather_statistics, extract_largest_area_data
 from scipy.ndimage.measurements import label, find_objects, center_of_mass
@@ -9,6 +11,7 @@ from scipy.ndimage.filters import median_filter
 import matplotlib.pyplot as plt
 import numpy.polynomial.polynomial as poly
 from mpl_toolkits.mplot3d import Axes3D
+from modules.tools.io import open_data
 
 def gen_ranges(s,arr):
     l = len(arr)
@@ -95,8 +98,10 @@ def fill_emptiness(empty_ranges, binary_spine_data):
 
     return output
 
-def get_centroids_border_labels(empty_ranges, binary_spine_data):
+def get_centroids_bboxes_border_labels(empty_ranges, binary_spine_data):
     print 'Get centroinds of border labels...'
+
+    output_centroids, output_bboxes = [], []
 
     def check_range(rng):
         if rng[0] == 0:
@@ -111,18 +116,99 @@ def get_centroids_border_labels(empty_ranges, binary_spine_data):
 
         if check_range(rng) == 0:
             if len(rng) > 1:
-                l_arr,r_arr = np.array_split(rng, 2)
-                output[l_arr.astype(np.int32)] = output[l_arr[0] - 1]
-                output[r_arr.astype(np.int32)] = output[r_arr[-1] + 1]
-            else:
-                output[rng.astype(np.int32)] = output[rng[-1] + 1]
-        elif check_range(rng) == -1:
-            output[rng.astype(np.int32)] = output[rng[0] - 1]
-        elif check_range(rng) == 1:
-            output[rng.astype(np.int32)] = output[rng[-1] + 1]
-        else:
-            print 'Range can\'t be checked!'
+                first_idx, last_idx = rng[0] - 1, rng[-1] + 1
+                slice_stats_first, __ = cell_counter(binary_spine_data[first_idx])
+                print slice_stats_first
+                slice_stats_last, __ = cell_counter(binary_spine_data[last_idx])
+                print slice_stats_last
 
+                output_centroids.append(np.array([[slice_stats_first['com_z'][0], slice_stats_first['com_y'][0], first_idx], \
+                                                  [slice_stats_last['com_z'][0], slice_stats_last['com_y'][0], last_idx]]))
+                first_bbox = np.array([[slice_stats_first['bb_z'][0], slice_stats_first['bb_y'][0]], [slice_stats_first['bb_depth'][0], slice_stats_first['bb_height'][0]]])
+                last_bbox = np.array([[slice_stats_last['bb_z'][0], slice_stats_last['bb_y'][0]], [slice_stats_last['bb_depth'][0], slice_stats_last['bb_height'][0]]])
+                output_bboxes.append(np.array([first_bbox, last_bbox]))
+            else:
+                nearest_idx = rng[-1] + 1
+                slice_stats, __ = cell_counter(binary_spine_data[nearest_idx])
+                output_centroids.append(np.array([[slice_stats['com_z'][0], slice_stats['com_y'][0], nearest_idx]]))
+                output_bboxes.append(np.array([[slice_stats['bb_z'][0], slice_stats['bb_y'][0]], [slice_stats['bb_depth'][0], slice_stats['bb_height'][0]]]))
+        else:
+            nearest_idx = (rng[0] - 1) if (check_range(rng) == -1) else (rng[-1] + 1)
+            slice_stats, __ = cell_counter(binary_spine_data[nearest_idx])
+            output_centroids.append(np.array([[slice_stats['com_z'][0], slice_stats['com_y'][0], nearest_idx]]))
+            output_bboxes.append(np.array([[slice_stats['bb_z'][0], slice_stats['bb_y'][0]], [slice_stats['bb_depth'][0], slice_stats['bb_height'][0]]]))
+
+    return output_centroids, output_bboxes
+
+def fit_fill_spine(empty_ranges, centroid_coords, label_bboxes, binary_spine_data):
+    print 'Fit and fill spine...'
+
+    output = binary_spine_data.copy()
+
+    def extract_label(bbox, slice_idx, stack_data):
+        y0, x0 = bbox[0][0], bbox[0][1]
+        height, width = bbox[1][0], bbox[1][1]
+
+        ext_label = stack_data[slice_idx, y0:(y0 + height), x0:(x0 + width)]
+
+        return ext_label
+
+    def get_label_ranges(label, coord_com):
+        label_shape = label.shape
+
+        r_range = np.arange(label_shape[0]) - label_shape[0]/2
+        c_range = np.arange(label_shape[1]) - label_shape[1]/2
+
+        return r_range + coord_com[0], c_range + coord_com[1]
+
+    if len(empty_ranges) != len(centroid_coords):
+        sys.exit("Empty ranges and centriods arrays are not equal!")
+
+    for rng, coord, bboxes in zip(empty_ranges, centroid_coords, label_bboxes):
+        print 'Range [%d:%d]...' % (rng[0], rng[-1])
+
+        if len(coord) > 1 and len(rng) > 1:
+            x = coord[:,0]
+            y = coord[:,1]
+            z = coord[:,2]
+
+            coefs = poly.polyfit(z, zip(x,y), 3)
+            xy_fitted = np.round(poly.polyval(rng, coefs))
+
+            first_bbox = bboxes[0]
+            last_bbox = bboxes[1]
+
+            first_label = extract_label(first_bbox, z[0], binary_spine_data)
+            last_label = extract_label(last_bbox, z[1], binary_spine_data)
+
+            f_rng, l_rng = np.array_split(rng, 2)
+            f_fit_rng, l_fit_rng = np.array_split(np.arange(len(xy_fitted[1])), 2)
+
+            for index, z_val in zip(f_fit_rng, f_rng):
+                rows, cols = get_label_ranges(first_label, (xy_fitted[0][index], xy_fitted[1][index]))
+                output[z_val, rows[:, np.newaxis].astype(np.int32), cols.astype(np.int32)] = first_label
+
+            for index, z_val in zip(l_fit_rng, l_rng):
+                rows, cols = get_label_ranges(last_label, (xy_fitted[0][index], xy_fitted[1][index]))
+                output[z_val, rows[:, np.newaxis].astype(np.int32), cols.astype(np.int32)] = last_label
+
+        else:
+            output[rng.astype(np.int32)] = output[coord[0][2]]
+
+    return output
+
+def get_circle_roi_spine(binary_spine_data):
+    output = np.zeros_like(binary_spine_data, dtype=np.uint8)
+
+    for idx in np.arange(binary_spine_data.shape[0]):
+        print 'Slice %d/%d' % (idx + 1, binary_spine_data.shape[0])
+
+        slice_stats, __ = cell_counter(binary_spine_data[idx])
+        row, col = np.round(slice_stats['com_z'][0]).astype(np.int32), np.round(slice_stats['com_y'][0]).astype(np.int32)
+        rr, cc = circle(row, col, 30)
+        output[idx, rr, cc] = 1
+
+    return output
 
 def fit_spine(x, y, z, z_new):
     coefs = poly.polyfit(z, zip(x,y), 3)
@@ -159,6 +245,8 @@ def segment_spine(spine_data, min_area=200.0, min_circularity=0.4, num_splits=10
         spine_data_labeled[slice_idx] = labels
         total_stats = total_stats.append(stats, ignore_index=True)
 
+    spine_data_labeled.tofile('C:\\Users\\Administrator\\Documents\\AFS-Segmentation\\tests\\fish204_spine_labels_not_filtered_8bit_179x229x1667.raw')
+
     print "Stats filtering..."
     filtered_stats_neg = total_stats[(total_stats['area'] <= min_area) | (total_stats['circularity'] <= min_circularity)]
     filtered_stats = total_stats[(total_stats['area'] > min_area) & (total_stats['circularity'] > min_circularity)]
@@ -188,35 +276,57 @@ def segment_spine(spine_data, min_area=200.0, min_circularity=0.4, num_splits=10
 
             stats_final = stats_local[stats_local['com_sum'] <= tolerance].sort(['com_sum']).groupby('slice_idx', as_index=False).first()
 
-            print stats_final
-
             for idx, row in stats_final.iterrows():
                 tmp_labels = spine_data_labeled[row['slice_idx']]
                 tmp_labels[tmp_labels != row['label']] = 0.0
                 tmp_labels[tmp_labels != 0] = 1.0
                 spine_data_labeled_final[row['slice_idx']] = tmp_labels
+                spine_data_labeled_final[row['slice_idx']] = binary_fill_holes(spine_data_labeled_final[row['slice_idx']])
 
     spine_data_thresholded.tofile('C:\\Users\\Administrator\\Documents\\AFS-Segmentation\\tests\\fish204_spine_threshod_8bit_179x229x1667.raw')
     spine_data_labeled_final.tofile('C:\\Users\\Administrator\\Documents\\AFS-Segmentation\\tests\\fish204_spine_labels_final_8bit_179x229x1667.raw')
     total_stats.to_csv('C:\\Users\\Administrator\\Documents\\AFS-Segmentation\\tests\\fish204_spine_labels.csv')
 
+    return spine_data_labeled_final
 
-def main():
-    spine_path = 'C:\\Users\\Administrator\\Documents\\AFS-Segmentation\\tests\\fish204_spine_32bit_179x229x1667.raw'
-    spine_data = np.memmap(spine_path, dtype=np.float32, mode='r', shape=(1667,229,179))
+def run_spine_segmentation(spine_path):
+    '''
+    Segments spine using circle detection and approximates
+    the trajectory of spine on empty ranges with fitting polynom,
+    then the approximated trajectory is used to fill the emptiness
+    with neighbour spine slices.
+    '''
 
-    #segment_spine(spine_data, min_area=200.0, min_circularity=0.6)
+    spine_data = open_data(spine_path)
 
-    segmeneted_spine_brain_path = 'C:\\Users\\Administrator\\Documents\\AFS-Segmentation\\tests\\fish204_spine_labels_final_8bit_179x229x1667.raw'
-    segmeneted_spine_brain_data = np.memmap(segmeneted_spine_brain_path, dtype=np.float32, mode='r', shape=(1667,229,179))
+    segmeneted_spine_brain_data = segment_spine(spine_data, min_area=200.0, min_circularity=0.5)
 
     empty_indices = get_empty_indices(segmeneted_spine_brain_data)
-    print "empty_indices = " + str(empty_indices)
     empty_ranges = get_empty_ranges(empty_indices)
-    print "empty_ranges = " + str(empty_ranges)
-    filled_brain_seg = fill_emptiness(empty_ranges, segmeneted_spine_brain_data)
+    label_centroids, label_bboxes = get_centroids_bboxes_border_labels(empty_ranges, segmeneted_spine_brain_data)
+    filled_spine_seg = fit_fill_spine(empty_ranges, label_centroids, label_bboxes, segmeneted_spine_brain_data)
 
-    filled_brain_seg.tofile('C:\\Users\\Administrator\\Documents\\AFS-Segmentation\\tests\\fish204_spine_labels_final_filled_8bit_179x229x1667.raw')
+    return filled_spine_seg
 
-if __name__ == "__main__":
-    main()
+# def main():
+#     spine_path = 'C:\\Users\\Administrator\\Documents\\AFS-Segmentation\\tests\\fish204_spine_32bit_179x229x1667.raw'
+#     spine_data = np.memmap(spine_path, dtype=np.float32, mode='r', shape=(1667,229,179))
+#
+#     segmeneted_spine_brain_data = segment_spine(spine_data, min_area=200.0, min_circularity=0.5)
+#
+#     #segmeneted_spine_brain_path = 'C:\\Users\\Administrator\\Documents\\AFS-Segmentation\\tests\\fish204_spine_labels_final_8bit_179x229x1667.raw'
+#     #segmeneted_spine_brain_data = np.memmap(segmeneted_spine_brain_path, dtype=np.float32, mode='r', shape=(1667,229,179))
+#
+#     empty_indices = get_empty_indices(segmeneted_spine_brain_data)
+#     empty_ranges = get_empty_ranges(empty_indices)
+#     label_centroids, label_bboxes = get_centroids_bboxes_border_labels(empty_ranges, segmeneted_spine_brain_data)
+#     filled_spine_seg = fit_fill_spine(empty_ranges, label_centroids, label_bboxes, segmeneted_spine_brain_data)
+#     #filled_spine_seg.tofile('C:\\Users\\Administrator\\Documents\\AFS-Segmentation\\tests\\fish204_spine_labels_final_filled_fitted_v2_8bit_179x229x1667.raw')
+#
+#     filled_spine_seg_path = 'C:\\Users\\Administrator\\Documents\\AFS-Segmentation\\tests\\fish204_spine_labels_final_filled_fitted_v2_8bit_179x229x1667.raw'
+#     filled_spine_seg_data = np.memmap(filled_spine_seg_path, dtype=np.float32, mode='r', shape=(1667,229,179))
+#     thin_spine_seg = get_circle_roi_spine(filled_spine_seg_data)
+#     thin_spine_seg.tofile('C:\\Users\\Administrator\\Documents\\AFS-Segmentation\\tests\\fish204_spine_labels_final_thinned_seg_8bit_179x229x1667.raw')
+#
+# if __name__ == "__main__":
+#     main()

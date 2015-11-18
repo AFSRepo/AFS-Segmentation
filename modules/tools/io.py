@@ -27,10 +27,11 @@ def create_raw_stack(dirpath, prefix):
 
         _shape = fb.open(os.path.join(dirpath, files[0])).data.shape
 
-        stack_data = np.zeros((len(files), _shape[1], _shape[0]))
+        stack_data = np.zeros((len(files), _shape[1], _shape[0]), dtype=np.float32)
 
         for i in np.arange(stack_data.shape[0]):
-            stack_data[i] = fb.open(os.path.join(dirpath, files[i])).data
+            stack_data[i] = fb.open(os.path.join(dirpath, files[i])).data.astype(np.float32)
+
             if i % 100 == 0:
                 print 'Converted slices %d' % i
 
