@@ -7,7 +7,7 @@ from modules.tools.processing import binarizator
 from modules.tools.misc import Timer
 from modules.tools.morphology import object_counter, gather_statistics, extract_largest_area_data
 from modules.segmentation.eyes import eyes_statistics, eyes_zrange
-from modules.segmentation.common import split_fish, align_fish, crop_align_data, brain_segmentation
+from modules.segmentation.common import split_fish, align_fish, crop_align_data, brain_segmentation, brain_segmentation_nifty
 from scipy.ndimage.measurements import label, find_objects
 from scipy.ndimage.interpolation import zoom, rotate
 import pandas as pd
@@ -191,8 +191,55 @@ def run_brain_segmentation():
 
         brain_segmentation(fixed_data_env, moving_data_env)
 
+def run_brain_segmentation_unix():
+    target_project_path = "/mnt/lsdf/tomo/rshkarin/AFS-playground/Segmentation/fish202"
+    target_input_path = "/mnt/lsdf/tomo/rshkarin/AFS-playground/ProcessedMedaka/fish202/fish202_aligned_32bit_640x640x1996.raw"
+    target_input_labels_path = "/mnt/lsdf/tomo/rshkarin/AFS-playground/ProcessedMedaka/fish202/fish202_aligned_labels_8bit_640x640x1996.raw"
+    target_input_spine_labels_path = "/mnt/lsdf/tomo/rshkarin/AFS-playground/ProcessedMedaka/fish202/fish202_aligned_spine_labels_8bit_640x640x1996.raw"
+
+    # moving_project_paths = ["C:\\Users\\Administrator\\Documents\\AFS-Segmentation\\fish204",\
+    #                         "C:\\Users\\Administrator\\Documents\\AFS-Segmentation\\fish200",\
+    #                         "C:\\Users\\Administrator\\Documents\\AFS-Segmentation\\fish215"]
+    # moving_input_paths = ["C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish204\\fish204_rotated_32bit_631x631x1992.raw",\
+    #                       "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish200\\fish200_rotated_32bit_573x573x2470.raw",\
+    #                       "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish215\\fish215_32bit_640x640x2478.raw"]
+    # fish_num = ["204", "200", "215"]
+
+    # moving_project_paths = ["C:\\Users\\Administrator\\Documents\\AFS-Segmentation\\fish200",\
+    #                         "C:\\Users\\Administrator\\Documents\\AFS-Segmentation\\fish215"]
+    # moving_input_paths = ["C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish200\\fish200_rotated_32bit_573x573x2470.raw",\
+    #                       "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish215\\fish215_32bit_640x640x2478.raw"]
+    # fish_num = ["200", "215"]
+
+    moving_project_paths = ["/mnt/lsdf/tomo/rshkarin/AFS-playground/Segmentation/fish204"]
+    moving_input_paths = ["/mnt/lsdf/tomo/rshkarin/AFS-playground/ProcessedMedaka/fish204/fish204_rotated_32bit_631x631x1992.raw"]
+    fish_num = ["204"]
+
+    print 'PEW PEW PEW FIST LAUNCH OF AUTO-BRAIN SEGMENTATION!'
+
+    for proj_path, input_path, fn in zip(moving_project_paths, moving_input_paths, fish_num):
+        print '########################################## Fish %s ##########################################' % fn
+        moving_data_env = DataEnvironment(proj_path, input_path)
+        fixed_data_env = DataEnvironment(target_project_path, target_input_path)
+
+        fixed_data_env.set_input_labels_path(target_input_labels_path)
+        fixed_data_env.set_input_spine_labels_path(target_input_spine_labels_path)
+        fixed_data_env.set_target_data_path(input_path)
+
+        moving_data_env.set_target_data_path(target_input_path)
+
+        print 'Moving data project path: %s' % proj_path
+        print 'Moving data input path: %s' % proj_path
+
+        print 'Fixed data project path: %s' % target_project_path
+        print 'Fixed data input path: %s' % target_input_path
+        print 'Fixed data target data path: %s' % fixed_data_env.envs['target_data_path']
+
+        brain_segmentation_nifty(fixed_data_env, moving_data_env)
+
 if __name__ == "__main__":
-    run_brain_segmentation()
+    run_brain_segmentation_unix()
+    # run_brain_segmentation()
     # convert_fish(200)
     # convert_fish(215)
     #

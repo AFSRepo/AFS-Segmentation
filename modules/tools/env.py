@@ -33,6 +33,11 @@ class DataEnvironment(object):
         self.genericAffine = '%s0GenericAffine.mat'
         self.warped = '%sWarped.nii.gz'
 
+        self.regName = '%sOutputRegResult.nii.gz'
+        self.nonRigidTransName = '%sOutputRegNonRigidTransform.nii.gz'
+        self.affineMatrix = '%sAffineMatrix.txt'
+        self.invAffineMatrix = '%sInvAffineMatrix.txt'
+
         self.ANTSPATH = "C:\\Users\\Administrator\\Documents\\ANTs"
 
     def save(self):
@@ -98,6 +103,18 @@ class DataEnvironment(object):
         out_names['iwarp'] = self.oneInverseWarp % final_name
         out_names['gen_affine'] = self.genericAffine % final_name
         out_names['warped'] = self.warped % final_name
+
+        return out_names
+
+    def _get_nifty_output_names(self, fixed_image_name, fixed_image_size, moving_image_name, moving_image_size, phase_name):
+        final_name = '%s_%s_%sTO%s_%s' % (phase_name, moving_image_name, moving_image_size, fixed_image_name, fixed_image_size)
+
+        out_names = dict()
+        out_names['out_name'] = final_name
+        out_names['reg_result'] = self.regName % final_name
+        out_names['non_rigid_trans'] = self.nonRigidTransName % final_name
+        out_names['affine_mat'] = self.affineMatrix % final_name
+        out_names['inv_affine_mat'] = self.invAffineMatrix % final_name
 
         return out_names
 
@@ -190,6 +207,28 @@ class DataEnvironment(object):
             return self.envs['%s_ants_input_data_path' % phase_name]
         else:
             print 'Error (get_aligned_data_paths): No target file!'
+            return None
+
+    def get_aligned_data_paths_nifty(self, phase_name, produce_paths=True):
+        if self.envs['target_data_path']:
+            moving_image_name, _, moving_image_size, _ = parse_filename(self.envs['input_data_path'])
+            fixed_image_name, _, fixed_image_size, _ = parse_filename(self.envs['target_data_path'])
+
+            moving_image_size_str = 'x'.join(str(v) for v in moving_image_size)
+            fixed_image_size_str = 'x'.join(str(v) for v in fixed_image_size)
+
+            out_names = self._get_nifty_output_names(fixed_image_name, fixed_image_size_str, \
+                            moving_image_name, moving_image_size_str, phase_name)
+
+            if produce_paths:
+                for key, value in out_names.items():
+                    out_names[key] = os.path.join(self.envs['project_temp_path'], value)
+
+            self.envs['%s_nifty_input_data_path' % phase_name] = out_names
+
+            return self.envs['%s_nifty_input_data_path' % phase_name]
+        else:
+            print 'Error (get_aligned_data_paths_nifty): No target file!'
             return None
 
     def get_statistic_path(self, prefix):
