@@ -192,10 +192,10 @@ def run_brain_segmentation():
         brain_segmentation(fixed_data_env, moving_data_env)
 
 def run_brain_segmentation_unix():
-    target_project_path = "/mnt/lsdf/tomo/rshkarin/AFS-playground/Segmentation/fish202"
-    target_input_path = "/mnt/lsdf/tomo/rshkarin/AFS-playground/ProcessedMedaka/fish202/fish202_aligned_32bit_640x640x1996.raw"
-    target_input_labels_path = "/mnt/lsdf/tomo/rshkarin/AFS-playground/ProcessedMedaka/fish202/fish202_aligned_labels_8bit_640x640x1996.raw"
-    target_input_spine_labels_path = "/mnt/lsdf/tomo/rshkarin/AFS-playground/ProcessedMedaka/fish202/fish202_aligned_spine_labels_8bit_640x640x1996.raw"
+    target_project_path = "/home/rshkarin/ANKA_work/AFS-playground/Segmentation/fish202"
+    target_input_path = "/home/rshkarin/ANKA_work/AFS-playground/ProcessedMedaka/fish202/fish202_aligned_32bit_640x640x1996.raw"
+    target_input_labels_path = "/home/rshkarin/ANKA_work/AFS-playground/ProcessedMedaka/fish202/fish202_aligned_labels_8bit_640x640x1996.raw"
+    target_input_spine_labels_path = "/home/rshkarin/ANKA_work/AFS-playground/ProcessedMedaka/fish202/fish202_aligned_spine_labels_8bit_640x640x1996.raw"
 
     # moving_project_paths = ["C:\\Users\\Administrator\\Documents\\AFS-Segmentation\\fish204",\
     #                         "C:\\Users\\Administrator\\Documents\\AFS-Segmentation\\fish200",\
@@ -211,8 +211,8 @@ def run_brain_segmentation_unix():
     #                       "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish215\\fish215_32bit_640x640x2478.raw"]
     # fish_num = ["200", "215"]
 
-    moving_project_paths = ["/mnt/lsdf/tomo/rshkarin/AFS-playground/Segmentation/fish204"]
-    moving_input_paths = ["/mnt/lsdf/tomo/rshkarin/AFS-playground/ProcessedMedaka/fish204/fish204_rotated_32bit_631x631x1992.raw"]
+    moving_project_paths = ["/home/rshkarin/ANKA_work/AFS-playground/Segmentation/fish204"]
+    moving_input_paths = ["/home/rshkarin/ANKA_work/AFS-playground/ProcessedMedaka/fish204/fish204_rotated_32bit_631x631x1992.raw"]
     fish_num = ["204"]
 
     print 'PEW PEW PEW FIST LAUNCH OF AUTO-BRAIN SEGMENTATION!'

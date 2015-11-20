@@ -1344,7 +1344,7 @@ def brain_segmentation_nifty(fixed_data_env, moving_data_env, use_full_size=Fals
                 moving_image_path_sep, output_path_sep, \
                 affine_matrix_path_sep, inv_affine_matrix_path_sep, \
                 cpp_image_path=non_rigid_trans_sep, use_bspline=True, \
-                num_levels=2, reg_prefix=nifty_prefix_sep)
+                num_levels=3, reg_prefix=nifty_prefix_sep)
 
         fixed_data_env.save()
         moving_data_env.save()
@@ -1433,7 +1433,7 @@ def brain_segmentation_nifty(fixed_data_env, moving_data_env, use_full_size=Fals
        not os.path.exists(moving_data_env.envs['zoomed_0p5_abdomen_labels_input_data_path_niigz']) or \
        not os.path.exists(moving_data_env.envs['zoomed_0p5_head_labels_input_data_path_niigz']):
 
-        aligned_data_moving = open_data(ants_prealign_paths['warped'])
+        aligned_data_moving = open_data(nifty_prealign_paths['reg_result'])
         aligned_data_labels_moving = open_data(transformation_output_tr)
 
         separation_pos_moving, abdomen_label_moving_full, head_label_moving_full = find_separation_pos(aligned_data_labels_moving)
@@ -1585,7 +1585,7 @@ def brain_segmentation_nifty(fixed_data_env, moving_data_env, use_full_size=Fals
     reg_prefix_brain_tr = 'head_brain_label_deforming'
 
     if not os.path.exists(transformation_output_brain_tr):
-        apply_transform_fish(wokring_env_brain_tr, ref_image_path_brain_tr, transformation_path_brain_tr,\
+        apply_transform_fish_nifty(wokring_env_brain_tr, ref_image_path_brain_tr, transformation_path_brain_tr,\
                              labels_image_path_brain_tr, transformation_output_brain_tr, reg_prefix=reg_prefix_brain_tr)
 
         fixed_data_env.save()
@@ -1635,6 +1635,11 @@ def brain_segmentation_nifty(fixed_data_env, moving_data_env, use_full_size=Fals
     scaled_initally_aligned_data_brain_labels_path = transformation_output_brain_labels_inverse_tr
     target_orignal_data_fish_path = moving_data_env.get_input_path()
     upscaled_initially_aligned_complete_vol_unknown_brain_labels_niigz_path = moving_data_env.get_new_volume_niigz_path(test_data_complete_vol_brain_moving.shape, 'complete_volume_brain_labels_initial_alignment', bits=8)
+
+    print scaled_initally_aligned_data_brain_labels_path
+    print target_orignal_data_fish_path
+    print upscaled_initially_aligned_complete_vol_unknown_brain_labels_niigz_path
+    print moving_data_env.get_effective_volume_bbox()
 
     if not os.path.exists(upscaled_initially_aligned_complete_vol_unknown_brain_labels_niigz_path):
         upscaled_initally_aligned_data_brain_labels = scale_to_size(target_orignal_data_fish_path, \
@@ -2373,7 +2378,7 @@ def brain_segmentation(fixed_data_env, moving_data_env, use_full_size=False):
     else:
         print "The initially aligned completed unknown fish's brain labels is already upscaled to the input volume size."
 
-def scale_to_size(target_data_path, extracted_scaled_data_path, extracted_data_bbox, scale=2.0, order=0):
+def scale_to_size_old(target_data_path, extracted_scaled_data_path, extracted_data_bbox, scale=2.0, order=0):
     target_data = open_data(target_data_path)
     extracted_scaled_data = open_data(extracted_scaled_data_path)
 
@@ -2402,6 +2407,19 @@ def scale_to_size(target_data_path, extracted_scaled_data_path, extracted_data_b
 
     return rescaled_data
 
+def scale_to_size(target_data_path, extracted_scaled_data_path, extracted_data_bbox, scale=2.0, order=0):
+    target_data = open_data(target_data_path)
+    extracted_scaled_data = open_data(extracted_scaled_data_path)
+
+    rescaled_extracted_data = zoom(extracted_scaled_data, scale, order=order)
+
+    print "target_data.shape = %s" % str(target_data.shape)
+    print "bbox = %s" % str(extracted_data_bbox)
+    print "extracted_scaled_data.shape = %s" % str(extracted_scaled_data.shape)
+
+    complete_scaled_data = complete_volume_to_full_volume(target_data.shape, rescaled_extracted_data, extracted_data_bbox)
+
+    return complete_scaled_data
 def complete_brain_to_full_volume(abdomed_part_path, head_part_path, extracted_brain_volume_path, extracted_brain_volume_bbox, separation_overlap=1):
     abdomed_part = open_data(abdomed_part_path)
     head_part = open_data(head_part_path)
@@ -2417,9 +2435,7 @@ def complete_brain_to_full_volume(abdomed_part_path, head_part_path, extracted_b
 
     return mask_full_volume
 
-def complete_volume_to_full_volume(target_data_shape, extracted_data_path, extracted_data_bbox):
-    extracted_data = open_data(extracted_data_path)
-
+def complete_volume_to_full_volume(target_data_shape, extracted_data, extracted_data_bbox):
     completed_data = np.zeros(shape=target_data_shape, dtype=extracted_data.dtype)
     completed_data[extracted_data_bbox] = extracted_data
 
