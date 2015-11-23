@@ -82,6 +82,12 @@ class DataEnvironment(object):
     def get_effective_volume_bbox(self):
         return pickle.loads(self.envs['effective_volume_bbox']) if self.envs['effective_volume_bbox'] else None
 
+    def set_zoomed_effective_volume_bbox(self, bbox):
+        self.envs['zoomed_effective_volume_bbox'] = pickle.dumps(bbox)
+
+    def get_zoomed_effective_volume_bbox(self):
+        return pickle.loads(self.envs['zoomed_effective_volume_bbox']) if self.envs['zoomed_effective_volume_bbox'] else None
+
     def set_input_labels_path(self, filepath):
         self.envs['input_data_labels_path'] = filepath
 

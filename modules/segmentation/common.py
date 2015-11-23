@@ -41,9 +41,15 @@ def produce_cropped_data(data_env):
             print bbox_ext_volume
             print ext_volume.shape
 
-            zoomed_0p5_ext_volume = zoom(ext_volume, 0.5, order=3)
+            zoom_factor = 0.5
+
+            zoomed_0p5_ext_volume = zoom(ext_volume, zoom_factor, order=3)
+            zoomed_bbox_ext_volume  = _zoom_bbox(bbox_ext_volume, zoom_factor)
+
+            print zoomed_bbox_ext_volume
 
             data_env.set_effective_volume_bbox(bbox_ext_volume)
+            data_env.set_zoomed_effective_volume_bbox(zoomed_bbox_ext_volume)
 
             ext_volume_path = data_env.get_new_volume_path(ext_volume.shape, 'extracted')
             ext_volume_niigz_path = data_env.get_new_volume_niigz_path(ext_volume.shape, 'extracted')
@@ -59,9 +65,9 @@ def produce_cropped_data(data_env):
 
             if data_env.get_input_labels_path():
                 input_data_labels = open_data(data_env.get_input_labels_path())
-
+            
                 ext_volume_labels = input_data_labels[bbox_ext_volume]
-                zoomed_0p5_ext_volume_labels = zoom(ext_volume_labels, 0.5, order=0)
+                zoomed_0p5_ext_volume_labels = zoom(ext_volume_labels, zoom_factor, order=0)
 
                 ext_volume_labels_path = data_env.get_new_volume_labels_path(ext_volume_labels.shape, 'extracted')
                 ext_volume_labels_niigz_path = data_env.get_new_volume_labels_niigz_path(ext_volume_labels.shape, 'extracted')
@@ -81,7 +87,7 @@ def produce_cropped_data(data_env):
                 input_data_spine_labels = open_data(data_env.get_input_spine_labels_path())
 
                 ext_volume_spine_labels = input_data_spine_labels[bbox_ext_volume]
-                zoomed_0p5_ext_volume_spine_labels = zoom(ext_volume_spine_labels, 0.5, order=0)
+                zoomed_0p5_ext_volume_spine_labels = zoom(ext_volume_spine_labels, zoom_factor, order=0)
 
                 ext_volume_spine_labels_path = data_env.get_new_volume_labels_path(ext_volume_spine_labels.shape, 'extracted_spine')
                 ext_volume_spine_labels_niigz_path = data_env.get_new_volume_labels_niigz_path(ext_volume_spine_labels.shape, 'extracted_spine')
@@ -1558,14 +1564,15 @@ def brain_segmentation_nifty(fixed_data_env, moving_data_env, use_full_size=Fals
     output_path_brain_reg = nifty_head_brain_reg_paths['reg_result']
     affine_matrix_path_brain_reg = nifty_head_brain_reg_paths['affine_mat']
     inv_affine_matrix_path_brain_reg = nifty_head_brain_reg_paths['inv_affine_mat']
-    non_rigid_trans_brain_reg = nifty_head_brain_reg_paths['non_rigid_trans'] 
+    non_rigid_trans_brain_reg = nifty_head_brain_reg_paths['non_rigid_trans']
+    grid_spacing_brain_reg = -3
 
     if not os.path.exists(output_path_brain_reg):
         align_fish_nifty(working_env_head_brain_reg, fixed_image_path_head_brain_reg, \
                 moving_image_path_head_brain_reg, output_path_brain_reg, \
                 affine_matrix_path_brain_reg, inv_affine_matrix_path_brain_reg, \
                 cpp_image_path=non_rigid_trans_brain_reg, use_bspline=True, \
-                reg_prefix=nifty_prefix_head_brain_reg)
+                reg_prefix=nifty_prefix_head_brain_reg, grid_spacing=grid_spacing_brain_reg)
 
         fixed_data_env.save()
         moving_data_env.save()
@@ -1635,6 +1642,7 @@ def brain_segmentation_nifty(fixed_data_env, moving_data_env, use_full_size=Fals
     scaled_initally_aligned_data_brain_labels_path = transformation_output_brain_labels_inverse_tr
     target_orignal_data_fish_path = moving_data_env.get_input_path()
     upscaled_initially_aligned_complete_vol_unknown_brain_labels_niigz_path = moving_data_env.get_new_volume_niigz_path(test_data_complete_vol_brain_moving.shape, 'complete_volume_brain_labels_initial_alignment', bits=8)
+    zoomed_volume_bbox = moving_data_env.get_zoomed_effective_volume_bbox()
 
     print scaled_initally_aligned_data_brain_labels_path
     print target_orignal_data_fish_path
@@ -1644,7 +1652,7 @@ def brain_segmentation_nifty(fixed_data_env, moving_data_env, use_full_size=Fals
     if not os.path.exists(upscaled_initially_aligned_complete_vol_unknown_brain_labels_niigz_path):
         upscaled_initally_aligned_data_brain_labels = scale_to_size(target_orignal_data_fish_path, \
                                                                     scaled_initally_aligned_data_brain_labels_path, \
-                                                                    moving_data_env.get_effective_volume_bbox(), \
+                                                                    zoomed_volume_bbox, \
                                                                     scale=2.0, \
                                                                     order=0)
         save_as_nifti(upscaled_initally_aligned_data_brain_labels, \
@@ -2366,11 +2374,12 @@ def brain_segmentation(fixed_data_env, moving_data_env, use_full_size=False):
     scaled_initally_aligned_data_brain_labels_path = transformation_output_brain_labels_inverse_tr
     target_orignal_data_fish_path = moving_data_env.get_input_path()
     upscaled_initially_aligned_complete_vol_unknown_brain_labels_niigz_path = moving_data_env.get_new_volume_niigz_path(test_data_complete_vol_brain_moving.shape, 'complete_volume_brain_labels_initial_alignment', bits=8)
+    zoomed_effective_bbox = moving_data_env.get_zoomed_effective_volume_bbox()
 
     if not os.path.exists(upscaled_initially_aligned_complete_vol_unknown_brain_labels_niigz_path):
         upscaled_initally_aligned_data_brain_labels = scale_to_size(target_orignal_data_fish_path, \
                                                                     scaled_initally_aligned_data_brain_labels_path, \
-                                                                    moving_data_env.get_effective_volume_bbox(), \
+                                                                    zoomed_effective_bbox, \
                                                                     scale=2.0, \
                                                                     order=0)
         save_as_nifti(upscaled_initally_aligned_data_brain_labels, \
@@ -2407,17 +2416,15 @@ def scale_to_size_old(target_data_path, extracted_scaled_data_path, extracted_da
 
     return rescaled_data
 
-def scale_to_size(target_data_path, extracted_scaled_data_path, extracted_data_bbox, scale=2.0, order=0):
+def scale_to_size(target_data_path, extracted_scaled_data_path, \
+                  extracted_scaled_data_bbox, scale=2.0, order=0):
     target_data = open_data(target_data_path)
     extracted_scaled_data = open_data(extracted_scaled_data_path)
 
     rescaled_extracted_data = zoom(extracted_scaled_data, scale, order=order)
+    rescaled_extracted_bbox = _zoom_bbox(extracted_scaled_data_bbox, scale)
 
-    print "target_data.shape = %s" % str(target_data.shape)
-    print "bbox = %s" % str(extracted_data_bbox)
-    print "extracted_scaled_data.shape = %s" % str(extracted_scaled_data.shape)
-
-    complete_scaled_data = complete_volume_to_full_volume(target_data.shape, rescaled_extracted_data, extracted_data_bbox)
+    complete_scaled_data = complete_volume_to_full_volume(target_data.shape, rescaled_extracted_data, rescaled_extracted_bbox)
 
     return complete_scaled_data
 def complete_brain_to_full_volume(abdomed_part_path, head_part_path, extracted_brain_volume_path, extracted_brain_volume_bbox, separation_overlap=1):
@@ -2543,7 +2550,8 @@ def align_fish(working_env, fixed_image_path, moving_image_path, output_name, \
 
 def align_fish_nifty(working_env, fixed_image_path, moving_image_path, \
         output_image_path, aff_path, inv_aff_path, cpp_image_path=None, \
-        reg_prefix=None, use_bspline=False, rigid_case=1, num_levels=3):
+        reg_prefix=None, use_bspline=False, rigid_case=1, num_levels=3, \
+        grid_spacing=-5):
 
     working_path = working_env.get_working_path()
     
@@ -2556,7 +2564,8 @@ def align_fish_nifty(working_env, fixed_image_path, moving_image_path, \
     if use_bspline:
         args_fmt_bspline = {'fixed_image': fixed_image_path, 'moving_image': \
             moving_image_path, 'affine_matrix': aff_path, 'output_image': \
-            output_image_path, 'cpp_image': cpp_image_path, 'num_ln': num_levels}
+            output_image_path, 'cpp_image': cpp_image_path, \
+            'num_ln': num_levels, 'grid_spacing': grid_spacing}
 
 
     run_rigid, run_bspline  = None, None
@@ -2569,7 +2578,7 @@ def align_fish_nifty(working_env, fixed_image_path, moving_image_path, \
             {output_image} -aff {affine_matrix}'.format(**args_fmt_rigid)
         run_bspline = 'reg_f3d -ref {fixed_image} -flo {moving_image} -res \
             {output_image} -aff {affine_matrix} -cpp {cpp_image} -maxit 1000 \
-            -ln {num_ln} -gpu'.format(**args_fmt_bspline)
+            -ln {num_ln} -sx {grid_spacing} -gpu'.format(**args_fmt_bspline)
 
     process = subpr.Popen(run_rigid, cwd=working_path, shell=True)
     streamdata = process.communicate()[0]
@@ -2687,3 +2696,9 @@ def flip_fish(stack_data, eyes_stats, is_tail_fisrt=True):
         return stack_data[::-1,:,:] if is_tail_fisrt else stack_data
     else:
         return stack_data if not is_tail_fisrt else stack_data[::-1,:,:]
+
+def _zoom_bbox(bbox, scale):
+    return tuple([slice(int(round(v.start * scale)), \
+                        int(round(v.stop * scale)), \
+                        int(round(v.step * scale)) if v.step else None) \
+                 for v in bbox])

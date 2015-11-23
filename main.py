@@ -204,16 +204,18 @@ def run_brain_segmentation_unix():
     #                       "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish200\\fish200_rotated_32bit_573x573x2470.raw",\
     #                       "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish215\\fish215_32bit_640x640x2478.raw"]
     # fish_num = ["204", "200", "215"]
+      
+    moving_project_paths = ["/home/rshkarin/ANKA_work/AFS-playground/Segmentation/fish200"]
+    moving_input_paths = ["/home/rshkarin/ANKA_work/AFS-playground/ProcessedMedaka/fish200/fish200_rotated_32bit_573x573x2470.raw"]
+    fish_num = ["200"]
+   
+   #  moving_project_paths = ["/home/rshkarin/ANKA_work/AFS-playground/Segmentation/fish215"]
+   #  moving_input_paths = ["/home/rshkarin/ANKA_work/AFS-playground/ProcessedMedaka/fish215/fish215_32bit_640x640x2478.raw"]
+    # fish_num = ["215"]
 
-    # moving_project_paths = ["C:\\Users\\Administrator\\Documents\\AFS-Segmentation\\fish200",\
-    #                         "C:\\Users\\Administrator\\Documents\\AFS-Segmentation\\fish215"]
-    # moving_input_paths = ["C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish200\\fish200_rotated_32bit_573x573x2470.raw",\
-    #                       "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish215\\fish215_32bit_640x640x2478.raw"]
-    # fish_num = ["200", "215"]
-
-    moving_project_paths = ["/home/rshkarin/ANKA_work/AFS-playground/Segmentation/fish204"]
-    moving_input_paths = ["/home/rshkarin/ANKA_work/AFS-playground/ProcessedMedaka/fish204/fish204_rotated_32bit_631x631x1992.raw"]
-    fish_num = ["204"]
+    # moving_project_paths = ["/home/rshkarin/ANKA_work/AFS-playground/Segmentation/fish204"]
+    # moving_input_paths = ["/home/rshkarin/ANKA_work/AFS-playground/ProcessedMedaka/fish204/fish204_rotated_32bit_631x631x1992.raw"]
+    # fish_num = ["204"]
 
     print 'PEW PEW PEW FIST LAUNCH OF AUTO-BRAIN SEGMENTATION!'
 

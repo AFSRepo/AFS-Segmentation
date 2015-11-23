@@ -162,23 +162,12 @@ def cell_counter(slice_binary_data, min_area=0.0, min_circularity=0.0, slice_ind
 
     filtered_stats = objects_stats
 
-#    if min_area != 0.0 or min_circularity != 0.0:
-#        print "FIUIII!!!"
-#        filtered_stats_neg = objects_stats[(objects_stats['area'] <= min_area) | (objects_stats['circularity'] <= min_circularity)]
-#        filtered_stats = objects_stats[(objects_stats['area'] > min_area) & (objects_stats['circularity'] > min_circularity)]
-#
-#        for idx, row in filtered_stats_neg.iterrows():
-#            labeled_data[labeled_data == row['label']] = 0.0
-
     return filtered_stats, labeled_data
 
 def extract_data_by_label(stack_data, stack_stats, label, bb_side_offset=0):
     filtered_stats = stack_stats[stack_stats['label'] == label].head(1)
-    print "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@ CHECK extract_data_by_label"
     bbox = BBox(filtered_stats.to_dict('records')[0])
     tuple_bbox = bbox.create_tuple(offset=bb_side_offset, max_ranges=stack_data.shape)
-    print "INPUT extract_data_by_label = %s" % str(stack_data.shape)
-    print "BBOX extract_data_by_label = %s" % str(tuple_bbox)
 
     return stack_data[bbox.create_tuple(offset=bb_side_offset)], tuple_bbox
 
