@@ -7,7 +7,9 @@ from modules.tools.processing import binarizator
 from modules.tools.misc import Timer
 from modules.tools.morphology import object_counter, gather_statistics, extract_largest_area_data
 from modules.segmentation.eyes import eyes_statistics, eyes_zrange
-from modules.segmentation.common import split_fish, align_fish, crop_align_data, brain_segmentation, brain_segmentation_nifty
+from modules.segmentation.common import split_fish, align_fish
+from modules.segmentation.common import crop_align_data, brain_segmentation, \
+brain_segmentation_nifty, brain_segmentation_ants
 from scipy.ndimage.measurements import label, find_objects
 from scipy.ndimage.interpolation import zoom, rotate
 import pandas as pd
@@ -41,6 +43,23 @@ def rotate_data_fish202():
 
     rotated_data.tofile((output_path % 202) + '\\fish202_rotated_order3_32bit_640x640x1996.raw')
 
+def rotate_data_fish200():
+    output_path = "/home/rshkarin/ANKA_work/AFS-playground/ProcessedMedaka/fish%d"
+
+    input_path = "/home/rshkarin/ANKA_work/AFS-playground/ProcessedMedaka/fish200/fish200_rotated_32bit_573x573x2470.raw"
+    fish_data = open_data(input_path)
+
+    t = Timer()
+    a_z = 6.0
+    a_y = -2.0
+    rotated_data = rotate(fish_data, a_z, axes=(2, 1), order=3, reshape=False)
+    rotated_data = rotate(rotated_data, a_y, axes=(0, 2), order=3, reshape=False)
+    t.elapsed('Rotation')
+
+    rotated_data.tofile(os.path.join((output_path % 200), 'fish200_rotated_aligned_order3_32bit_573x573x2470.raw'))
+
+
+#FIX!!!!!!!
 
 #FIX!!!!!!!
 def zoom_rotate(input_path, rotate_angle, output_path, rot_axis='z'):
@@ -191,11 +210,61 @@ def run_brain_segmentation():
 
         brain_segmentation(fixed_data_env, moving_data_env)
 
+class FishDataEnv:
+    def __init__(self, target_project_path, target_input_path, \
+            target_input_labels_path, moving_project_path, moving_input_path, \
+            moving_fish_num):
+        self.fish_num = moving_fish_num
+
+        self.moving_project_path = moving_project_path
+        self.moving_input_path = moving_input_path
+
+        self.target_project_path = target_project_path
+        self.target_input_path = target_input_path
+
+        self.moving_data_env = DataEnvironment(moving_project_path, moving_input_path)
+        self.fixed_data_env = DataEnvironment(target_project_path, target_input_path)
+
+        self.fixed_data_env.set_input_labels_path(target_input_labels_path)
+        self.fixed_data_env.set_target_data_path(moving_input_path)
+
+        self.moving_data_env.set_target_data_path(target_input_path)
+
+    def __str__(self):
+        text = ''
+        text += 'Moving data project path: %s\n' % self.moving_project_path
+        text += 'Moving data input path: %s\n' % self.moving_input_path
+        text += 'Fixed data project path: %s\n' % self.target_project_path
+        text += 'Fixed data input path: %s' % self.target_input_path
+        text += 'Fixed data target data path: %s' % self.fixed_data_env.envs['target_data_path']
+
+        return text
+
+def _build_fish_data_paths():
+    data = []
+    data.append(FishDataEnv("/home/rshkarin/ANKA_work/AFS-playground/Segmentation/fish200",\
+                            "/home/rshkarin/ANKA_work/AFS-playground/ProcessedMedaka/fish200/fish200_rotated_aligned_order3_32bit_573x573x2470.raw",\
+                            "/home/rshkarin/ANKA_work/AFS-playground/ProcessedMedaka/fish200/fish200_rotated_aligned_order3_labels_8bit_573x573x2470.raw",\
+                            "/home/rshkarin/ANKA_work/AFS-playground/Segmentation/fish215",\
+                            "/home/rshkarin/ANKA_work/AFS-playground/ProcessedMedaka/fish215/fish215_rotated_r90_32bit_640x640x2478.raw",\
+                            215))
+    data.append(FishDataEnv("/home/rshkarin/ANKA_work/AFS-playground/Segmentation/fish202",\
+                            "/home/rshkarin/ANKA_work/AFS-playground/ProcessedMedaka/fish202/fish202_aligned_32bit_640x640x1996.raw",\
+                            "/home/rshkarin/ANKA_work/AFS-playground/ProcessedMedaka/fish202/fish202_aligned_labels_8bit_640x640x1996.raw",\
+                            "/home/rshkarin/ANKA_work/AFS-playground/Segmentation/fish204",\
+                            "/home/rshkarin/ANKA_work/AFS-playground/ProcessedMedaka/fish204/fish204_rotated_32bit_631x631x1992.raw",\
+                            204))
+    return data
+
 def run_brain_segmentation_unix():
-    target_project_path = "/home/rshkarin/ANKA_work/AFS-playground/Segmentation/fish202"
-    target_input_path = "/home/rshkarin/ANKA_work/AFS-playground/ProcessedMedaka/fish202/fish202_aligned_32bit_640x640x1996.raw"
-    target_input_labels_path = "/home/rshkarin/ANKA_work/AFS-playground/ProcessedMedaka/fish202/fish202_aligned_labels_8bit_640x640x1996.raw"
-    target_input_spine_labels_path = "/home/rshkarin/ANKA_work/AFS-playground/ProcessedMedaka/fish202/fish202_aligned_spine_labels_8bit_640x640x1996.raw"
+    # target_project_path = "/home/rshkarin/ANKA_work/AFS-playground/Segmentation/fish202"
+    # target_input_path = "/home/rshkarin/ANKA_work/AFS-playground/ProcessedMedaka/fish202/fish202_aligned_32bit_640x640x1996.raw"
+    # target_input_labels_path = "/home/rshkarin/ANKA_work/AFS-playground/ProcessedMedaka/fish202/fish202_aligned_labels_8bit_640x640x1996.raw"
+    # target_input_spine_labels_path = "/home/rshkarin/ANKA_work/AFS-playground/ProcessedMedaka/fish202/fish202_aligned_spine_labels_8bit_640x640x1996.raw"
+
+    # target_project_path = "/home/rshkarin/ANKA_work/AFS-playground/Segmentation/fish200"
+    # target_input_path = "/home/rshkarin/ANKA_work/AFS-playground/ProcessedMedaka/fish200/fish200_rotated_aligned_order3_32bit_573x573x2470.raw"
+    # target_input_labels_path = "/home/rshkarin/ANKA_work/AFS-playground/ProcessedMedaka/fish200/fish200_rotated_aligned_order3_labels_8bit_573x573x2470.raw"
 
     # moving_project_paths = ["C:\\Users\\Administrator\\Documents\\AFS-Segmentation\\fish204",\
     #                         "C:\\Users\\Administrator\\Documents\\AFS-Segmentation\\fish200",\
@@ -204,13 +273,19 @@ def run_brain_segmentation_unix():
     #                       "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish200\\fish200_rotated_32bit_573x573x2470.raw",\
     #                       "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish215\\fish215_32bit_640x640x2478.raw"]
     # fish_num = ["204", "200", "215"]
-      
-    moving_project_paths = ["/home/rshkarin/ANKA_work/AFS-playground/Segmentation/fish200"]
-    moving_input_paths = ["/home/rshkarin/ANKA_work/AFS-playground/ProcessedMedaka/fish200/fish200_rotated_32bit_573x573x2470.raw"]
-    fish_num = ["200"]
-   
-   #  moving_project_paths = ["/home/rshkarin/ANKA_work/AFS-playground/Segmentation/fish215"]
-   #  moving_input_paths = ["/home/rshkarin/ANKA_work/AFS-playground/ProcessedMedaka/fish215/fish215_32bit_640x640x2478.raw"]
+
+    # moving_project_paths = ["/home/rshkarin/ANKA_work/AFS-playground/Segmentation/fish200", \
+    #                        "/home/rshkarin/ANKA_work/AFS-playground/Segmentation/fish215"]
+    # moving_input_paths = ["fish200_rotated_32bit_573x573x2470.raw",\
+    #                       "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish215\\fish215_32bit_640x640x2478.raw"
+    # fish_num = ["215"]
+
+    # moving_project_paths = ["/home/rshkarin/ANKA_work/AFS-playground/Segmentation/fish200"]
+    # moving_input_paths = ["/home/rshkarin/ANKA_work/AFS-playground/ProcessedMedaka/fish200/fish200_rotated_32bit_573x573x2470.raw"]
+    # fish_num = ["200"]
+
+    # moving_project_paths = ["/home/rshkarin/ANKA_work/AFS-playground/Segmentation/fish215"]
+    # moving_input_paths = ["/home/rshkarin/ANKA_work/AFS-playground/ProcessedMedaka/fish215/fish215_rotated_r90_32bit_640x640x2478.raw"]
     # fish_num = ["215"]
 
     # moving_project_paths = ["/home/rshkarin/ANKA_work/AFS-playground/Segmentation/fish204"]
@@ -225,7 +300,7 @@ def run_brain_segmentation_unix():
         fixed_data_env = DataEnvironment(target_project_path, target_input_path)
 
         fixed_data_env.set_input_labels_path(target_input_labels_path)
-        fixed_data_env.set_input_spine_labels_path(target_input_spine_labels_path)
+        # fixed_data_env.set_input_spine_labels_path(target_input_spine_labels_path)
         fixed_data_env.set_target_data_path(input_path)
 
         moving_data_env.set_target_data_path(target_input_path)
@@ -239,8 +314,22 @@ def run_brain_segmentation_unix():
 
         brain_segmentation_nifty(fixed_data_env, moving_data_env)
 
+def clean_version_run_brain_segmentation_unix():
+    fishes_envs = _build_fish_data_paths()
+
+    print 'PEW PEW PEW FIST LAUNCH OF AUTO-BRAIN SEGMENTATION!'
+    for fish_env in fishes_envs:
+        print '############################# Fish %d ###################################' % fish_env.fish_num
+        print fish_env
+
+        #brain_segmentation_nifty(fish_env.fixed_data_env, fish_env.moving_data_env)
+        brain_segmentation_ants(fish_env.fixed_data_env, fish_env.moving_data_env)
+
+
 if __name__ == "__main__":
-    run_brain_segmentation_unix()
+    clean_version_run_brain_segmentation_unix()
+    # rotate_data_fish200()
+    # run_brain_segmentation_unix()
     # run_brain_segmentation()
     # convert_fish(200)
     # convert_fish(215)

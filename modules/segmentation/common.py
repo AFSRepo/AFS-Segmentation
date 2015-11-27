@@ -13,6 +13,8 @@ from scipy.ndimage.interpolation import zoom, rotate
 #ANTs - 0 , NiftyReg - 1
 REG_TOOL = 1
 
+ANTS_SCRIPTS_PATH_FMT = "~/ANKA_work/ANTs_Scripts/"
+
 def produce_cropped_data(data_env):
     phase_name = 'extracted_input_data_path_niigz'
     phase_name_zoomed = 'zoomed_0p5_extracted_input_data_path_niigz'
@@ -36,7 +38,7 @@ def produce_cropped_data(data_env):
         if data_env.get_input_path():
             input_data = open_data(data_env.get_input_path())
 
-            ext_volume, bbox_ext_volume = extract_effective_volume(input_data, bb_side_offset=50)
+            ext_volume, bbox_ext_volume = extract_effective_volume(input_data, bb_side_offset=10)
             print "bbox_ext_volume "
             print bbox_ext_volume
             print ext_volume.shape
@@ -45,8 +47,6 @@ def produce_cropped_data(data_env):
 
             zoomed_0p5_ext_volume = zoom(ext_volume, zoom_factor, order=3)
             zoomed_bbox_ext_volume  = _zoom_bbox(bbox_ext_volume, zoom_factor)
-
-            print zoomed_bbox_ext_volume
 
             data_env.set_effective_volume_bbox(bbox_ext_volume)
             data_env.set_zoomed_effective_volume_bbox(zoomed_bbox_ext_volume)
@@ -65,7 +65,7 @@ def produce_cropped_data(data_env):
 
             if data_env.get_input_labels_path():
                 input_data_labels = open_data(data_env.get_input_labels_path())
-            
+
                 ext_volume_labels = input_data_labels[bbox_ext_volume]
                 zoomed_0p5_ext_volume_labels = zoom(ext_volume_labels, zoom_factor, order=0)
 
@@ -1313,7 +1313,7 @@ def brain_segmentation_nifty(fixed_data_env, moving_data_env, use_full_size=Fals
     # Pre-alignment fish1 to fish_aligned
     nifty_prefix_prealign = 'pre_alignment'
     nifty_prealign_paths = moving_data_env.get_aligned_data_paths_nifty(nifty_prefix_prealign)
-  
+
     working_env_prealign = moving_data_env
     fixed_image_path_prealign = fixed_data_env.envs['zoomed_0p5_extracted_input_data_path_niigz']
     fixed_image_path_prealign_raw = fixed_data_env.envs['zoomed_0p5_extracted_input_data_path']
@@ -1325,7 +1325,8 @@ def brain_segmentation_nifty(fixed_data_env, moving_data_env, use_full_size=Fals
     if not os.path.exists(output_path_prealign):
         align_fish_nifty(working_env_prealign, fixed_image_path_prealign, \
                 moving_image_path_prealign, output_path_prealign, \
-                affine_matrix_path_prealign, inv_affine_matrix_path_prealign, reg_prefix=nifty_prefix_prealign)
+                affine_matrix_path_prealign, inv_affine_matrix_path_prealign, \
+                num_levels=3, reg_prefix=nifty_prefix_prealign, maxit_rigid=10)
 
         fixed_data_env.save()
         moving_data_env.save()
@@ -1343,14 +1344,14 @@ def brain_segmentation_nifty(fixed_data_env, moving_data_env, use_full_size=Fals
     output_path_sep = nifty_separation_paths['reg_result']
     affine_matrix_path_sep = nifty_separation_paths['affine_mat']
     inv_affine_matrix_path_sep = nifty_separation_paths['inv_affine_mat']
-    non_rigid_trans_sep = nifty_separation_paths['non_rigid_trans'] 
+    non_rigid_trans_sep = nifty_separation_paths['non_rigid_trans']
 
     if not os.path.exists(non_rigid_trans_sep):
         align_fish_nifty(working_env_sep, fixed_image_path_sep, \
                 moving_image_path_sep, output_path_sep, \
                 affine_matrix_path_sep, inv_affine_matrix_path_sep, \
                 cpp_image_path=non_rigid_trans_sep, use_bspline=True, \
-                num_levels=3, reg_prefix=nifty_prefix_sep)
+                num_levels=3, reg_prefix=nifty_prefix_sep, maxit_rigid=10)
 
         fixed_data_env.save()
         moving_data_env.save()
@@ -1487,13 +1488,14 @@ def brain_segmentation_nifty(fixed_data_env, moving_data_env, use_full_size=Fals
     output_path_head_reg = nifty_head_reg_paths['reg_result']
     affine_matrix_path_head_reg = nifty_head_reg_paths['affine_mat']
     inv_affine_matrix_path_head_reg = nifty_head_reg_paths['inv_affine_mat']
-    non_rigid_trans_head_reg = nifty_head_reg_paths['non_rigid_trans'] 
+    non_rigid_trans_head_reg = nifty_head_reg_paths['non_rigid_trans']
 
     if not os.path.exists(output_path_head_reg):
         align_fish_nifty(working_env_head_reg, fixed_image_path_head_reg, \
                 moving_image_path_head_reg, output_path_head_reg, \
                 affine_matrix_path_head_reg, inv_affine_matrix_path_head_reg, \
-                cpp_image_path=non_rigid_trans_head_reg, use_bspline=True, reg_prefix=nifty_prefix_head_reg)
+                cpp_image_path=non_rigid_trans_head_reg, use_bspline=True, \
+                reg_prefix=nifty_prefix_head_reg, maxit_rigid=10)
 
         fixed_data_env.save()
         moving_data_env.save()
@@ -1504,7 +1506,7 @@ def brain_segmentation_nifty(fixed_data_env, moving_data_env, use_full_size=Fals
     # Transforming labels of head of fixed fish to the head of moving one
     wokring_env_htr = moving_data_env
     ref_image_path_htr = head_data_part_moving_niigz_path
-   
+
     transformation_path_htr = nifty_head_reg_paths['non_rigid_trans']
     labels_image_path_htr = head_data_part_labels_fixed_niigz_path
     test_data_htr = open_data(ref_image_path_htr)
@@ -1565,14 +1567,15 @@ def brain_segmentation_nifty(fixed_data_env, moving_data_env, use_full_size=Fals
     affine_matrix_path_brain_reg = nifty_head_brain_reg_paths['affine_mat']
     inv_affine_matrix_path_brain_reg = nifty_head_brain_reg_paths['inv_affine_mat']
     non_rigid_trans_brain_reg = nifty_head_brain_reg_paths['non_rigid_trans']
-    grid_spacing_brain_reg = -3
+    grid_spacing_brain_reg = -4
 
     if not os.path.exists(output_path_brain_reg):
         align_fish_nifty(working_env_head_brain_reg, fixed_image_path_head_brain_reg, \
                 moving_image_path_head_brain_reg, output_path_brain_reg, \
                 affine_matrix_path_brain_reg, inv_affine_matrix_path_brain_reg, \
                 cpp_image_path=non_rigid_trans_brain_reg, use_bspline=True, \
-                reg_prefix=nifty_prefix_head_brain_reg, grid_spacing=grid_spacing_brain_reg)
+                reg_prefix=nifty_prefix_head_brain_reg, \
+                grid_spacing=grid_spacing_brain_reg, maxit_rigid=30)
 
         fixed_data_env.save()
         moving_data_env.save()
@@ -2387,6 +2390,371 @@ def brain_segmentation(fixed_data_env, moving_data_env, use_full_size=False):
     else:
         print "The initially aligned completed unknown fish's brain labels is already upscaled to the input volume size."
 
+def brain_segmentation_ants(fixed_data_env, moving_data_env):
+
+    fixed_data_env.load()
+    moving_data_env.load()
+
+    # Crop the raw data
+    print "--Extracting net volumes"
+    fixed_data_results = produce_cropped_data(fixed_data_env)
+    moving_data_results = produce_cropped_data(moving_data_env)
+
+    fixed_data_env.save()
+    moving_data_env.save()
+
+    #generate_stats(fixed_data_env)
+    #generate_stats(moving_data_env)
+
+    print "--Pre-alignment of the unknown fish to the known one"
+    # Pre-alignment fish1 to fish_aligned
+    ants_prefix_prealign = 'pre_alignment'
+    ants_prealign_paths = moving_data_env.get_aligned_data_paths(ants_prefix_prealign)
+    ants_prealign_names = moving_data_env.get_aligned_data_paths(ants_prefix_prealign, produce_paths=False)
+
+    working_env_prealign = moving_data_env
+    fixed_image_path_prealign = fixed_data_env.envs['zoomed_0p5_extracted_input_data_path_niigz']
+    fixed_image_path_prealign_raw = fixed_data_env.envs['zoomed_0p5_extracted_input_data_path']
+    moving_image_path_prealign = moving_data_env.envs['zoomed_0p5_extracted_input_data_path_niigz']
+    output_name_prealign = ants_prealign_names['out_name']
+    warped_path_prealign = ants_prealign_paths['warped']
+    iwarped_path_prealign = ants_prealign_paths['iwarp']
+
+    if not os.path.exists(warped_path_prealign):
+        align_fish_simple_ants(working_env_prealign, fixed_image_path_prealign,\
+                               moving_image_path_prealign, output_name_prealign, \
+                               warped_path_prealign, iwarped_path_prealign, \
+                               reg_prefix=ants_prefix_prealign, use_syn=False, \
+                               use_full_iters=False)
+
+        fixed_data_env.save()
+        moving_data_env.save()
+    else:
+        print "Data is already prealigned"
+
+    print  "--Registration of the known fish to the unknown one"
+    # Registration of fish_aligned to fish1
+    ants_prefix_sep = 'parts_separation'
+    ants_separation_paths = fixed_data_env.get_aligned_data_paths(ants_prefix_sep)
+    working_env_sep = fixed_data_env
+    fixed_image_path_sep = warped_path_prealign
+    moving_image_path_sep = fixed_image_path_prealign
+    output_name_sep = ants_separation_paths['out_name']
+    warped_path_sep = ants_separation_paths['warped']
+    iwarped_path_sep = ants_separation_paths['iwarp']
+
+    if not os.path.exists(warped_path_sep):
+        align_fish_simple_ants(working_env_sep, fixed_image_path_sep, moving_image_path_sep, \
+                               output_name_sep, warped_path_sep, iwarped_path_sep, \
+                               reg_prefix=ants_prefix_sep, use_syn=True, use_full_iters=False)
+
+        fixed_data_env.save()
+        moving_data_env.save()
+    else:
+        print "Data is already registered for separation"
+
+    print "--Transforming brain and abdomen labels of the known fish to the unknown's one"
+    # Transforming labels of fish_aligned to fish1
+    wokring_env_tr = moving_data_env
+    ref_image_path_tr = ants_prealign_paths['warped']
+    affine_transformation_path_tr = ants_separation_paths['gen_affine']
+    def_transformation_path_tr = ants_separation_paths['warp']
+    labels_image_path_tr = fixed_data_env.envs['zoomed_0p5_extracted_input_data_labels_path_niigz']
+
+    __, __, new_size, __ = parse_filename(fixed_image_path_prealign_raw)
+
+    transformation_output_tr = moving_data_env.get_new_volume_niigz_path(new_size, 'zoomed_0p5_extracted_labels', bits=8)
+    reg_prefix_tr = 'label_deforming'
+
+    if not os.path.exists(transformation_output_tr):
+        apply_transform_fish(wokring_env_tr, ref_image_path_tr, \
+                             affine_transformation_path_tr, \
+                             labels_image_path_tr, transformation_output_tr, \
+                             def_transformation_path=def_transformation_path_tr, \
+                             reg_prefix=reg_prefix_tr)
+
+        fixed_data_env.save()
+        moving_data_env.save()
+    else:
+        print "Abdomen and brain data is already transformed"
+
+    #Separate head and tail of fixed image
+    print "--Fish separation (Fixed image)..."
+    abdomen_data_part_fixed_niigz_path = None
+    head_data_part_fixed_niigz_path = None
+    abdomen_data_part_labels_fixed_niigz_path = None
+    head_data_part_labels_fixed_niigz_path = None
+
+    if not os.path.exists(fixed_data_env.envs['zoomed_0p5_abdomen_input_data_path_niigz']) or \
+       not os.path.exists(fixed_data_env.envs['zoomed_0p5_head_input_data_path_niigz']) or \
+       not os.path.exists(fixed_data_env.envs['zoomed_0p5_abdomen_labels_input_data_path_niigz']) or \
+       not os.path.exists(fixed_data_env.envs['zoomed_0p5_head_labels_input_data_path_niigz']):
+
+        aligned_data_fixed = open_data(fixed_image_path_prealign)
+        aligned_data_labels_fixed = open_data(labels_image_path_tr)
+
+        separation_pos_fixed, abdomen_label_fixed_full, head_label_fixed_full = find_separation_pos(aligned_data_labels_fixed)
+
+        abdomen_data_part_fixed, head_data_part_fixed = split_fish_by_pos(aligned_data_fixed, separation_pos_fixed, overlap=20)
+        abdomen_label_fixed, _ = split_fish_by_pos(abdomen_label_fixed_full, separation_pos_fixed, overlap=20)
+        _, head_label_fixed = split_fish_by_pos(head_label_fixed_full, separation_pos_fixed, overlap=20)
+
+        abdomen_data_part_fixed_niigz_path = fixed_data_env.get_new_volume_niigz_path(abdomen_data_part_fixed.shape, 'zoomed_0p5_abdomen')
+        if not os.path.exists(abdomen_data_part_fixed_niigz_path):
+            save_as_nifti(abdomen_data_part_fixed, abdomen_data_part_fixed_niigz_path)
+
+        head_data_part_fixed_niigz_path = fixed_data_env.get_new_volume_niigz_path(head_data_part_fixed.shape, 'zoomed_0p5_head')
+        if not os.path.exists(head_data_part_fixed_niigz_path):
+            save_as_nifti(head_data_part_fixed, head_data_part_fixed_niigz_path)
+
+        abdomen_data_part_labels_fixed_niigz_path = fixed_data_env.get_new_volume_niigz_path(abdomen_label_fixed.shape, 'zoomed_0p5_abdomen_labels')
+        if not os.path.exists(abdomen_data_part_labels_fixed_niigz_path):
+            save_as_nifti(abdomen_label_fixed, abdomen_data_part_labels_fixed_niigz_path)
+
+        head_data_part_labels_fixed_niigz_path = fixed_data_env.get_new_volume_niigz_path(head_label_fixed.shape, 'zoomed_0p5_head_labels')
+        if not os.path.exists(head_data_part_labels_fixed_niigz_path):
+            save_as_nifti(head_label_fixed, head_data_part_labels_fixed_niigz_path)
+
+        print abdomen_data_part_labels_fixed_niigz_path
+        print head_data_part_labels_fixed_niigz_path
+
+        fixed_data_env.save()
+    else:
+        abdomen_data_part_fixed_niigz_path = fixed_data_env.envs['zoomed_0p5_abdomen_input_data_path_niigz']
+        head_data_part_fixed_niigz_path = fixed_data_env.envs['zoomed_0p5_head_input_data_path_niigz']
+        abdomen_data_part_labels_fixed_niigz_path = fixed_data_env.envs['zoomed_0p5_abdomen_labels_input_data_path_niigz']
+        head_data_part_labels_fixed_niigz_path = fixed_data_env.envs['zoomed_0p5_head_labels_input_data_path_niigz']
+
+    #Separate head and tail of moving image
+    print "--Fish separation (Moving image)..."
+    abdomen_data_part_moving_niigz_path = None
+    abdomen_data_part_labels_moving_niigz_path = None
+    head_data_part_moving_niigz_path = None
+    head_data_part_labels_moving_niigz_path = None
+
+    if not os.path.exists(moving_data_env.envs['zoomed_0p5_abdomen_input_data_path_niigz']) or \
+       not os.path.exists(moving_data_env.envs['zoomed_0p5_head_input_data_path_niigz']) or \
+       not os.path.exists(moving_data_env.envs['zoomed_0p5_abdomen_labels_input_data_path_niigz']) or \
+       not os.path.exists(moving_data_env.envs['zoomed_0p5_head_labels_input_data_path_niigz']):
+
+        aligned_data_moving = open_data(ants_prealign_paths['warped'])
+        aligned_data_labels_moving = open_data(transformation_output_tr)
+
+        separation_pos_moving, abdomen_label_moving_full, head_label_moving_full = find_separation_pos(aligned_data_labels_moving)
+
+        abdomen_data_part_moving, head_data_part_moving = split_fish_by_pos(aligned_data_moving, separation_pos_moving, overlap=20)
+        abdomen_label_moving, _ = split_fish_by_pos(abdomen_label_moving_full, separation_pos_moving, overlap=20)
+        _, head_label_moving = split_fish_by_pos(head_label_moving_full, separation_pos_moving, overlap=20)
+
+        abdomen_data_part_moving_niigz_path = moving_data_env.get_new_volume_niigz_path(abdomen_data_part_moving.shape, 'zoomed_0p5_abdomen')
+        if not os.path.exists(abdomen_data_part_moving_niigz_path):
+            save_as_nifti(abdomen_data_part_moving, abdomen_data_part_moving_niigz_path)
+
+        head_data_part_moving_niigz_path = moving_data_env.get_new_volume_niigz_path(head_data_part_moving.shape, 'zoomed_0p5_head')
+        if not os.path.exists(head_data_part_moving_niigz_path):
+            save_as_nifti(head_data_part_moving, head_data_part_moving_niigz_path)
+
+        abdomen_data_part_labels_moving_niigz_path = moving_data_env.get_new_volume_niigz_path(abdomen_label_moving.shape, 'zoomed_0p5_abdomen_labels')
+        if not os.path.exists(abdomen_data_part_labels_moving_niigz_path):
+            save_as_nifti(abdomen_label_moving, abdomen_data_part_labels_moving_niigz_path)
+
+        head_data_part_labels_moving_niigz_path = moving_data_env.get_new_volume_niigz_path(head_label_moving.shape, 'zoomed_0p5_head_labels')
+        if not os.path.exists(head_data_part_labels_moving_niigz_path):
+            save_as_nifti(head_label_moving, head_data_part_labels_moving_niigz_path)
+
+        print abdomen_data_part_labels_moving_niigz_path
+        print head_data_part_labels_moving_niigz_path
+
+        moving_data_env.save()
+    else:
+        abdomen_data_part_moving_niigz_path = moving_data_env.envs['zoomed_0p5_abdomen_input_data_path_niigz']
+        abdomen_data_part_labels_moving_niigz_path = moving_data_env.envs['zoomed_0p5_abdomen_labels_input_data_path_niigz']
+        head_data_part_moving_niigz_path = moving_data_env.envs['zoomed_0p5_head_input_data_path_niigz']
+        head_data_part_labels_moving_niigz_path = moving_data_env.envs['zoomed_0p5_head_labels_input_data_path_niigz']
+
+    print "--Register known fish's head to the unknown's one..."
+    #Register fixed head to moving one
+    ants_prefix_head_reg = 'head_registration'
+    ants_head_reg_paths = fixed_data_env.get_aligned_data_paths(ants_prefix_head_reg)
+    working_env_head_reg = fixed_data_env
+    fixed_image_path_head_reg = head_data_part_moving_niigz_path
+    moving_image_path_head_reg = head_data_part_fixed_niigz_path
+    output_name_head_reg = ants_head_reg_paths['out_name']
+    warped_path_head_reg = ants_head_reg_paths['warped']
+    iwarped_path_head_reg = ants_head_reg_paths['iwarp']
+
+    if not os.path.exists(warped_path_head_reg):
+        align_fish_simple_ants(working_env_head_reg, fixed_image_path_head_reg, \
+                               moving_image_path_head_reg, output_name_head_reg, \
+                               warped_path_head_reg, iwarped_path_head_reg, \
+                               reg_prefix=ants_prefix_head_reg, use_syn=True, \
+                               use_full_iters=False)
+
+        fixed_data_env.save()
+        moving_data_env.save()
+    else:
+        print "Head of the fixed data is already registered to the head of moving one"
+
+    print "--Transfrom labels of known fish's head into the unknown's one..."
+    # Transforming labels of head of fixed fish to the head of moving one
+    wokring_env_htr = moving_data_env
+    ref_image_path_htr = head_data_part_moving_niigz_path
+    print ref_image_path_htr
+    transformation_path_htr = ants_head_reg_paths['gen_affine']
+    def_transformation_path_htr = ants_head_reg_paths['warp']
+    labels_image_path_htr = head_data_part_labels_fixed_niigz_path
+    test_data_htr = open_data(ref_image_path_htr)
+    transformation_output_htr = moving_data_env.get_new_volume_niigz_path(test_data_htr.shape, 'zoomed_0p5_head_brain_labels', bits=8)
+    reg_prefix_htr = 'head_label_deforming'
+
+    if not os.path.exists(transformation_output_htr):
+        apply_transform_fish(wokring_env_tr, ref_image_path_htr, \
+                             transformation_path_htr, labels_image_path_htr, \
+                             transformation_output_htr, \
+                             def_transformation_path=def_transformation_path_htr, \
+                             reg_prefix=reg_prefix_htr)
+        fixed_data_env.save()
+        moving_data_env.save()
+    else:
+        print "Head data is already transformed"
+
+    print "--Extract the unknown fish's brain using transformed head labels..."
+    # Extract moving brain volume
+    head_brain_label_moving = open_data(transformation_output_htr)
+    head_brain_data_moving = open_data(ref_image_path_htr)
+    brain_data_volume_moving, brain_data_volume_moving_bbox = extract_largest_volume_by_label(head_brain_data_moving, head_brain_label_moving, bb_side_offset=10)
+    brain_data_volume_moving_niigz_path = moving_data_env.get_new_volume_niigz_path(brain_data_volume_moving.shape, 'zoomed_0p5_head_extracted_brain')
+
+    print brain_data_volume_moving_niigz_path
+
+    if not os.path.exists(brain_data_volume_moving_niigz_path):
+        save_as_nifti(brain_data_volume_moving, brain_data_volume_moving_niigz_path)
+
+    print "--Extract the known fish's head using labels..."
+    # Extract fixed brain volume
+    head_brain_label_fixed = open_data(labels_image_path_htr)
+    head_brain_data_fixed = open_data(moving_image_path_head_reg)
+    brain_data_volume_fixed, brain_fixed_bbox = extract_largest_volume_by_label(head_brain_data_fixed, head_brain_label_fixed, bb_side_offset=10)
+    brain_data_labels_volume_fixed = head_brain_label_fixed[brain_fixed_bbox]
+
+    brain_data_volume_fixed_niigz_path = fixed_data_env.get_new_volume_niigz_path(brain_data_volume_fixed.shape, 'zoomed_0p5_head_extracted_brain')
+    brain_data_labels_volume_fixed_niigz_path = fixed_data_env.get_new_volume_niigz_path(brain_data_labels_volume_fixed.shape, 'zoomed_0p5_head_extracted_brain_labels')
+
+    print brain_data_volume_fixed_niigz_path
+    print brain_data_labels_volume_fixed_niigz_path
+
+    if not os.path.exists(brain_data_volume_fixed_niigz_path):
+        save_as_nifti(brain_data_volume_fixed, brain_data_volume_fixed_niigz_path)
+
+    if not os.path.exists(brain_data_labels_volume_fixed_niigz_path):
+        save_as_nifti(brain_data_labels_volume_fixed, brain_data_labels_volume_fixed_niigz_path)
+
+    print "--Register the known fish's brain to the unknown's one..."
+    # Register the fixed brain to the moving one
+    ants_prefix_head_brain_reg = 'head_brain_registration'
+    ants_head_brain_reg_paths = fixed_data_env.get_aligned_data_paths(ants_prefix_head_brain_reg)
+    working_env_head_brain_reg = fixed_data_env
+    fixed_image_path_head_brain_reg = brain_data_volume_moving_niigz_path
+    moving_image_path_head_brain_reg = brain_data_volume_fixed_niigz_path
+    output_name_head_brain_reg = ants_head_brain_reg_paths['out_name']
+    warped_path_head_brain_reg = ants_head_brain_reg_paths['warped']
+    iwarped_path_head_brain_reg = ants_head_brain_reg_paths['iwarp']
+
+    if not os.path.exists(warped_path_head_brain_reg):
+        align_fish_simple_ants(working_env_head_brain_reg, \
+                               fixed_image_path_head_brain_reg, \
+                               moving_image_path_head_brain_reg, \
+                               output_name_head_brain_reg, \
+                               warped_path_head_brain_reg, \
+                               iwarped_path_head_brain_reg, \
+                               reg_prefix=ants_prefix_head_brain_reg, \
+                               use_syn=True, \
+                               use_full_iters=True)
+
+        fixed_data_env.save()
+        moving_data_env.save()
+    else:
+        print "The brain of the head of the fixed data is already registered to the brain of the head of moving one"
+
+
+    print "--Transform the known fish's brain labels into the unknown's one..."
+    # Transforming labels of the brain of head of fixed fish to the brain of the head of moving one
+    wokring_env_brain_tr = moving_data_env
+    ref_image_path_brain_tr = brain_data_volume_moving_niigz_path
+    transformation_path_brain_tr = ants_head_brain_reg_paths['gen_affine']
+    labels_image_path_brain_tr = brain_data_labels_volume_fixed_niigz_path
+    test_data_brain_tr = open_data(ref_image_path_brain_tr)
+    transformation_output_brain_tr = moving_data_env.get_new_volume_niigz_path(test_data_brain_tr.shape, 'zoomed_0p5_head_extracted_brain_labels', bits=8)
+    reg_prefix_brain_tr = 'head_brain_label_deforming'
+    def_transformation_path_brain_tr = ants_head_brain_reg_paths['warp']
+
+    if not os.path.exists(transformation_output_brain_tr):
+        apply_transform_fish(wokring_env_brain_tr, ref_image_path_brain_tr, \
+                             transformation_path_brain_tr, labels_image_path_brain_tr, \
+                             transformation_output_brain_tr, \
+                             def_transformation_path=def_transformation_path_brain_tr, \
+                             reg_prefix=reg_prefix_brain_tr)
+
+
+        fixed_data_env.save()
+        moving_data_env.save()
+    else:
+        print "The brain of the fixed head data is already transformed"
+
+    print "--Complete the unknown fish's brain labels to full volume..."
+    test_data_complete_vol_brain_moving = open_data(warped_path_prealign)
+    complete_vol_unknown_brain_labels_niigz_path = moving_data_env.get_new_volume_niigz_path(test_data_complete_vol_brain_moving.shape, 'zoomed_0p5_complete_volume_brain_labels', bits=8)
+
+    if not os.path.exists(complete_vol_unknown_brain_labels_niigz_path):
+        complete_vol_unknown_brain_labels = complete_brain_to_full_volume(abdomen_data_part_labels_moving_niigz_path, \
+                                                                         head_data_part_labels_moving_niigz_path, \
+                                                                         transformation_output_brain_tr, \
+                                                                         brain_data_volume_moving_bbox, \
+                                                                         separation_overlap=20);
+        save_as_nifti(complete_vol_unknown_brain_labels, complete_vol_unknown_brain_labels_niigz_path)
+    else:
+        print "The brain labels of the moving data (unknown fish) is already transformed."
+
+    print "--Inverse transfrom the completed unknown fish's brain labels to the initial alignment..."
+    wokring_env_brain_labels_inverse_tr = moving_data_env
+    ref_image_space_path_brain_labels_inverse_tr = moving_image_path_prealign
+    affine_transformation_path_brain_labels_inverse_tr = ants_prealign_paths['gen_affine']
+    labels_image_path_brain_inverse_tr = complete_vol_unknown_brain_labels_niigz_path
+    test_data_brain_inverse_tr = open_data(ref_image_space_path_brain_labels_inverse_tr)
+    transformation_output_brain_labels_inverse_tr = moving_data_env.get_new_volume_niigz_path(test_data_brain_inverse_tr.shape, 'zoomed_0p5_complete_volume_brain_labels_initial_alignment', bits=8)
+    reg_prefix_brain_labels_inverse_tr = 'complete_volume_brain_labels_deforming_to_initial_alignment'
+
+    if not os.path.exists(transformation_output_brain_labels_inverse_tr):
+        apply_inverse_transform_fish(wokring_env_brain_labels_inverse_tr, \
+                                     ref_image_space_path_brain_labels_inverse_tr, \
+                                     affine_transformation_path_brain_labels_inverse_tr, \
+                                     labels_image_path_brain_inverse_tr, \
+                                     transformation_output_brain_labels_inverse_tr, \
+                                     reg_prefix=reg_prefix_brain_labels_inverse_tr)
+
+        fixed_data_env.save()
+        moving_data_env.save()
+    else:
+        print "The completed unknown fish's brain labels is already transformed to the initial alignment."
+
+    print "--Upscale the initial aligned completed unknown fish's brain labels to the input volume size..."
+    scaled_initally_aligned_data_brain_labels_path = transformation_output_brain_labels_inverse_tr
+    target_orignal_data_fish_path = moving_data_env.get_input_path()
+    upscaled_initially_aligned_complete_vol_unknown_brain_labels_niigz_path = moving_data_env.get_new_volume_niigz_path(test_data_complete_vol_brain_moving.shape, 'complete_volume_brain_labels_initial_alignment', bits=8)
+    zoomed_volume_bbox = moving_data_env.get_zoomed_effective_volume_bbox()
+
+    if not os.path.exists(upscaled_initially_aligned_complete_vol_unknown_brain_labels_niigz_path):
+        upscaled_initally_aligned_data_brain_labels = scale_to_size(target_orignal_data_fish_path, \
+                                                                    scaled_initally_aligned_data_brain_labels_path, \
+                                                                    zoomed_volume_bbox, \
+                                                                    scale=2.0, \
+                                                                    order=0)
+        save_as_nifti(upscaled_initally_aligned_data_brain_labels, \
+                      upscaled_initially_aligned_complete_vol_unknown_brain_labels_niigz_path)
+    else:
+        print "The initially aligned completed unknown fish's brain labels is already upscaled to the input volume size."
+
+
 def scale_to_size_old(target_data_path, extracted_scaled_data_path, extracted_data_bbox, scale=2.0, order=0):
     target_data = open_data(target_data_path)
     extracted_scaled_data = open_data(extracted_scaled_data_path)
@@ -2463,6 +2831,9 @@ def extract_effective_volume(stack_data, eyes_stats=None, bb_side_offset=0):
     print 'Binarizing...'
     binarized_stack, bbox, eyes_stats = binarizator(stack_data)
     print bbox
+    print binarized_stack.shape
+    binarized_stack.tofile('/home/rshkarin/ANKA_work/AFS-playground/Segmentation/fish200/fish_binary_%s.raw' \
+            % str(binarized_stack.shape))
     timer.elapsed('Binarizing')
 
     timer = Timer()
@@ -2548,37 +2919,83 @@ def align_fish(working_env, fixed_image_path, moving_image_path, output_name, \
     rc = process.returncode
     print "antsRegistration = %d" % rc
 
+def align_fish_simple_ants(working_env, fixed_image_path, moving_image_path, output_name, \
+        warped_path, iwarped_path, reg_prefix=None, use_syn=True, \
+        use_full_iters=True, num_threads=24, \
+        path_ants_scripts_fmt=ANTS_SCRIPTS_PATH_FMT):
+
+    working_path = working_env.get_working_path()
+    os.environ["ANTSPATH"] = working_env.ANTSPATH
+
+    if not working_env.ANTSPATH:
+        sys.exit(1)
+
+    shell_app = "bash "
+    
+    args_fmt = {'out_name': output_name, 'warped_path': warped_path, \
+                'iwarped_path': iwarped_path, \
+                'fixedImagePath': fixed_image_path, \
+                'movingImagePath': moving_image_path, \
+                'num_threads': num_threads}
+
+    app = None
+
+    if not use_syn:
+        app = 'antsRegistrationSyNMid.sh -d 3 -f {fixedImagePath} ' \
+                '-m {movingImagePath} -o {out_name} -n {num_threads} -t r -p f'.format(**args_fmt)
+    else:
+        if use_full_iters:
+            app = 'antsRegistrationSyN.sh -d 3 -f {fixedImagePath} ' \
+                    '-m {movingImagePath} -o {out_name} -n {num_threads} -t b -p f'.format(**args_fmt)
+        else:
+            app = 'antsRegistrationSyNMid.sh -d 3 -f {fixedImagePath} ' \
+                    '-m {movingImagePath} -o {out_name} -n {num_threads} -t s -p f'.format(**args_fmt)
+
+    app = path_ants_scripts_fmt + app
+    print app
+    process = subpr.Popen(app, cwd=working_path, shell=True)
+    streamdata = process.communicate()[0]
+    rc = process.returncode
+    print "antsRegistration (Simple) = %d" % rc
+
+
+
 def align_fish_nifty(working_env, fixed_image_path, moving_image_path, \
         output_image_path, aff_path, inv_aff_path, cpp_image_path=None, \
         reg_prefix=None, use_bspline=False, rigid_case=1, num_levels=3, \
-        grid_spacing=-5):
+        grid_spacing=-5, omp=24, maxit_rigid=100, maxit_bspline=1000):
 
     working_path = working_env.get_working_path()
-    
+
     args_fmt_rigid, args_fmt_bspline = None, None
 
     args_fmt_rigid = {'fixed_image': fixed_image_path, 'moving_image': \
             moving_image_path, 'affine_matrix': aff_path, 'output_image': \
-            output_image_path }
+            output_image_path, 'num_ln': num_levels, 'omp': omp, \
+            'maxit_rigid': maxit_rigid}
 
     if use_bspline:
         args_fmt_bspline = {'fixed_image': fixed_image_path, 'moving_image': \
             moving_image_path, 'affine_matrix': aff_path, 'output_image': \
             output_image_path, 'cpp_image': cpp_image_path, \
-            'num_ln': num_levels, 'grid_spacing': grid_spacing}
+            'num_ln': num_levels, 'grid_spacing': grid_spacing, \
+            'maxit_bspline': maxit_bspline}
 
 
     run_rigid, run_bspline  = None, None
 
     if not use_bspline:
         if rigid_case == 1:
-            run_rigid = 'reg_aladin -ref {fixed_image} -flo {moving_image} -res {output_image} -aff {affine_matrix}'.format(**args_fmt_rigid)
+            run_rigid = 'reg_aladin -ref {fixed_image} -flo {moving_image} \
+            -res {output_image} -aff {affine_matrix} -ln {num_ln} -omp {omp} \
+            -maxit {maxit_rigid}'.format(**args_fmt_rigid)
     else:
         run_rigid = 'reg_aladin -ref {fixed_image} -flo {moving_image} -res \
-            {output_image} -aff {affine_matrix}'.format(**args_fmt_rigid)
+            {output_image} -aff {affine_matrix} -ln {num_ln} -omp {omp} \
+            -maxit {maxit_rigid}'.format(**args_fmt_rigid)
         run_bspline = 'reg_f3d -ref {fixed_image} -flo {moving_image} -res \
-            {output_image} -aff {affine_matrix} -cpp {cpp_image} -maxit 1000 \
-            -ln {num_ln} -sx {grid_spacing} -gpu'.format(**args_fmt_bspline)
+            {output_image} -aff {affine_matrix} -cpp {cpp_image} \
+            -ln {num_ln} -sx {grid_spacing} -maxit {maxit_bspline} -gpu'.format(**args_fmt_bspline)
 
     process = subpr.Popen(run_rigid, cwd=working_path, shell=True)
     streamdata = process.communicate()[0]
@@ -2602,21 +3019,35 @@ def align_fish_nifty(working_env, fixed_image_path, moving_image_path, \
     print "Nifty Reg Inv Aff Transform = %d" % rc
 
 # Warping from "Fixed" to "Moving" space
-def apply_transform_fish(wokring_env, ref_image_path, transformation_path, labels_image_path, transformation_output, reg_prefix=None):
+def apply_transform_fish(wokring_env, ref_image_path, affine_transformation_path, \
+                         labels_image_path, transformation_output, \
+                         def_transformation_path=None, reg_prefix=None):
     working_path = wokring_env.get_working_path()
     os.environ["ANTSPATH"] = wokring_env.ANTSPATH
 
-    args_fmt = {'refImage': ref_image_path, 'affineTransformation': transformation_path, 'labelImage': labels_image_path, 'newSegmentationImage': transformation_output}
-    app3 = 'antsApplyTransforms -d 3 -r {refImage} -t {affineTransformation} -n NearestNeighbor -i {labelImage} -o {newSegmentationImage} --float 1'.format(**args_fmt)
+    args_fmt = {'refImage': ref_image_path, \
+                'affineTransformation': affine_transformation_path, \
+                'labelImage': labels_image_path, \
+                'newSegmentationImage': transformation_output}
 
-    process = subpr.Popen(app3, cwd=working_path)
+    cmd_template = 'antsApplyTransforms -d 3 -r {refImage} ' \
+            '-t {affineTransformation} -n NearestNeighbor ' \
+            '-i {labelImage} -o {newSegmentationImage}'
+
+    if def_transformation_path:
+        cmd_template = cmd_template + ' -t {defTransformation}'
+        args_fmt['defTransformation'] = def_transformation_path
+
+    app = cmd_template.format(**args_fmt)
+
+    process = subpr.Popen(app, cwd=working_path, shell=True)
     streamdata = process.communicate()[0]
     rc = process.returncode
     print "antsApplyTransforms = %d" % rc
 
 def apply_transform_fish_nifty(wokring_env, ref_image_path, transformation_path, labels_image_path, transformation_output, reg_prefix=None):
     working_path = wokring_env.get_working_path()
-    
+
     args_fmt = {'refImage': ref_image_path, 'affineTransformation': transformation_path, 'labelImage': labels_image_path, 'newSegmentationImage': transformation_output}
     app3 = 'reg_resample -ref {refImage} -flo {labelImage} -trans \
     {affineTransformation} -res {newSegmentationImage} -inter 0'.format(**args_fmt)
@@ -2626,25 +3057,37 @@ def apply_transform_fish_nifty(wokring_env, ref_image_path, transformation_path,
     rc = process.returncode
     print "Nifty Reg Resample = %d" % rc
 
-def apply_inverse_transform_fish(wokring_env, ref_image_path, \
-        transformation_path, labels_image_path, transformation_output, \
-        reg_prefix=None):
+def apply_inverse_transform_fish(wokring_env, ref_image_path, affine_transformation_path, \
+                                 labels_image_path, transformation_output, \
+                                 inv_def_transformation_path=None, reg_prefix=None):
     working_path = wokring_env.get_working_path()
     os.environ["ANTSPATH"] = wokring_env.ANTSPATH
 
-    args_fmt = {'refImage': ref_image_path, 'affineTransformation': transformation_path, 'labelImage': labels_image_path, 'newSegmentationImage': transformation_output}
-    app3 = 'antsApplyTransforms -d 3 -r {refImage} -t [{affineTransformation}, 1] -n NearestNeighbor -i {labelImage} -o {newSegmentationImage} --float 1'.format(**args_fmt)
+    args_fmt = {'refImage': ref_image_path, \
+                'affineTransformation': affine_transformation_path, \
+                'labelImage': labels_image_path, \
+                'newSegmentationImage': transformation_output}
 
-    process = subpr.Popen(app3, cwd=working_path)
+    cmd_template = 'antsApplyTransforms -d 3 -r {refImage} ' \
+            '-t [{affineTransformation},1] -n NearestNeighbor ' \
+            '-i {labelImage} -o {newSegmentationImage}'
+
+    if inv_def_transformation_path:
+        cmd_template = cmd_template + ' -t {invDefTransformation}'
+        args_fmt['invDefTransformation'] = inv_def_transformation_path
+
+    app = cmd_template.format(**args_fmt)
+
+    process = subpr.Popen(app, cwd=working_path, shell=True)
     streamdata = process.communicate()[0]
     rc = process.returncode
-    print "antsApplyInverseTransforms = %d" % rc
+    print "antsApplyTransforms (Inverse) = %d" % rc
 
 def apply_inverse_transform_fish_nifty(wokring_env, ref_image_path, \
         inv_transformation_path, labels_image_path, transformation_output, \
         reg_prefix=None, interp_order=0):
     working_path = wokring_env.get_working_path()
-    
+
     args_fmt = {'refImage': ref_image_path, 'invAffineTransformation': \
             inv_transformation_path, 'labelImage': labels_image_path, \
             'newSegmentationImage': transformation_output, 'interp_order': \
@@ -2701,4 +3144,19 @@ def _zoom_bbox(bbox, scale):
     return tuple([slice(int(round(v.start * scale)), \
                         int(round(v.stop * scale)), \
                         int(round(v.step * scale)) if v.step else None) \
-                 for v in bbox])
+                                    for v in bbox])
+
+# def _zoom_bbox(bbox, scale, target_size=None, is_downscale=True):
+#     def _even_check(v, t):
+#         return int(round(v * scale)) if t % 2 == 0 else int(round(v * scale)) - 1
+#
+#     if is_downscale:
+#         return tuple([slice(int(round(v.start * scale)), \
+#                             int(round(v.stop * scale)), \
+#                             int(round(v.step * scale)) if v.step else None) \
+#                      for v in bbox])
+#     else:
+#         return tuple([slice(_even_check(v.start * scale, t), \
+#                             _even_check(v.stop * scale, t), \
+#                             _even_check(v.step * scale, t) if v.step else None) \
+#                     for v, t in bbox, target_size])

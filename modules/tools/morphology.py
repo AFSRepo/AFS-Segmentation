@@ -167,6 +167,7 @@ def cell_counter(slice_binary_data, min_area=0.0, min_circularity=0.0, slice_ind
 def extract_data_by_label(stack_data, stack_stats, label, bb_side_offset=0):
     filtered_stats = stack_stats[stack_stats['label'] == label].head(1)
     bbox = BBox(filtered_stats.to_dict('records')[0])
+    print "extracted_data_by_label = %s" % str(filtered_stats.to_dict('records')[0])
     tuple_bbox = bbox.create_tuple(offset=bb_side_offset, max_ranges=stack_data.shape)
 
     return stack_data[bbox.create_tuple(offset=bb_side_offset)], tuple_bbox

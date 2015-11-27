@@ -38,7 +38,7 @@ class DataEnvironment(object):
         self.affineMatrix = '%sAffineMatrix.txt'
         self.invAffineMatrix = '%sInvAffineMatrix.txt'
 
-        self.ANTSPATH = "C:\\Users\\Administrator\\Documents\\ANTs"
+        self.ANTSPATH = "/home/rshkarin/ANKA_work/antsbin/bin"
 
     def save(self):
         w = csv.writer(open(self._get_cache_path(), "w"))

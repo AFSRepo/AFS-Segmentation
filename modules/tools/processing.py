@@ -4,12 +4,14 @@ import pandas as pd
 from skimage.filters import threshold_otsu, threshold_li
 from scipy.ndimage.filters import median_filter
 from scipy.ndimage.morphology import binary_dilation, binary_closing, binary_fill_holes
+from skimage.morphology import disk, white_tophat
 from scipy.ndimage.measurements import label, find_objects
 from skimage.measure import regionprops
 from ..segmentation.eyes import eyes_statistics, eyes_zrange
 from .morphology import gather_statistics
 
-def binarizator(stack_data, eyes_stats=None, filter_size=6, non_zeros_ratio=0.5, preserve_big_objects=True):
+def binarizator(stack_data, eyes_stats=None, filter_size=6,
+        non_zeros_ratio=0.5, tolerance=50, preserve_big_objects=True):
     num_slices = stack_data.shape[0]
 
     print 'Binarizing - Eye range estimating...'
@@ -66,12 +68,40 @@ def binarizator(stack_data, eyes_stats=None, filter_size=6, non_zeros_ratio=0.5,
                 labeled_slice[ labeled_slice != max_area_label] = 0
                 labeled_slice[ labeled_slice == max_area_label] = 1
                 thresholded_stack[slice_idx] = labeled_slice
+    
+    print 'Binarizing - Remove streak artifacts...'
+    for slice_idx in np.arange(1, num_slices):
+        prev_slice_labels, _ = label(thresholded_stack[slice_idx - 1])
+        curr_slice_labels, _ = label(thresholded_stack[slice_idx])
+
+        prev_props = regionprops(prev_slice_labels)
+        curr_props = regionprops(curr_slice_labels)
+        
+        if len(prev_props) and len(curr_props):
+            prev_slice_bbox = max(prev_props, key=attrgetter('area')).bbox
+            curr_slice_bbox = max(curr_props, key=attrgetter('area')).bbox
+
+            if _detect_streaks(prev_slice_bbox, curr_slice_bbox, tolerance):
+                print 'Slice #%d' % slice_idx
+                filtered_streaks = white_tophat(thresholded_stack[slice_idx], \
+                                                selem=disk(15))
+                removed_streaks = thresholded_stack[slice_idx] - filtered_streaks
+                thresholded_stack[slice_idx] = \
+                        median_filter(removed_streaks, size=(filter_size,filter_size)) 
 
     bbox = find_objects(thresholded_stack)
 
     print "thresholded_stack = %s" % str(thresholded_stack.shape)
 
     return thresholded_stack, bbox, eyes_stats
+
+def _detect_streaks(prev_bbox, curr_bbox, tolerance):
+    p_width, p_height = prev_bbox[3] - prev_bbox[1], prev_bbox[2] - prev_bbox[0]
+    c_width, c_height = curr_bbox[3] - curr_bbox[1], curr_bbox[2] - curr_bbox[0]
+
+    return True if abs(p_width - c_width) > tolerance or \
+                   abs(p_height - c_height) > tolerance else False
+
 
 def _check_slice_position(slice_idx, num_slices, slice_threshold_ratio=0.2):
     num_slices_threshold = np.ceil(num_slices * slice_threshold_ratio)
