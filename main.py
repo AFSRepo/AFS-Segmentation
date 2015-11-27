@@ -2,7 +2,7 @@ import sys
 import os
 import numpy as np
 from modules.tools.env import DataEnvironment
-from multiprocessing import Process
+from multiprocessing import Process, Pool
 from modules.tools.io import create_raw_stack, open_data, create_filename_with_shape, parse_filename
 from modules.tools.processing import binarizator
 from modules.tools.misc import Timer
@@ -21,24 +21,32 @@ import shutil
 base_save_path = "C:\\Users\\Administrator\\Documents\\afs_test_out\\%s"
 
 def convert_fish(fish_number):
-        print '----Converting fish #%d' % fish_number
-        dir_path = "Z:\\grif\\ANKA_data\\2014\\XRegioMay2014\\tomography\\Phenotyping\\Recon\\fish%d\\Complete\\Corr" % fish_number
-        out_path = "Z:\\grif\\Phenotype_medaka\\Originals\\%s"
-        raw_data_stack = create_raw_stack(dir_path, "fish%d_proj_" % fish_number)
-        print '----Raw stack creating fish #%d' % fish_number
-        raw_data_stack.tofile(out_path % ("fish%d_32bit_%dx%dx%d.raw" % \
+    print '----Converting fish #%d' % fish_number
+    dir_path = "/mnt/lsdf/grif/ANKA_data/2014/XRegioMay2014/tomography/Phenotyping/Recon/fish%d/Complete/Corr" % fish_number
+    out_path = "/mnt/lsdf/grif/Phenotype_medaka/Originals/%s"
+    #dir_path = "Z:\\grif\\ANKA_data\\2014\\XRegioMay2014\\tomography\\Phenotyping\\Recon\\fish%d\\Complete\\Corr" % fish_number
+    #out_path = "Z:\\grif\\Phenotype_medaka\\Originals\\%s"
+    raw_data_stack = create_raw_stack(dir_path, "fish%d_proj_" % fish_number)
+
+    print '----Raw stack creating fish #%d' % fish_number
+    raw_data_stack.tofile(out_path % ("fish%d_32bit_%dx%dx%d.raw" % \
             (fish_number, raw_data_stack.shape[2], raw_data_stack.shape[1], raw_data_stack.shape[0])))
-        del raw_data_stack
+    del raw_data_stack
 
-def convert_fish_in_parallel(fish_num_array):
+def convert_fish_in_parallel(fish_num_array, core=4):
     t = Timer()
+    
+    # fish_num_arrays = np.array_split(fish_num_array, core)
 
-    jobs = [Process(target=convert_fish, args=fn) for fn in fish_num_array]
-    for j in jobs:
-        j.start()
+    # jobs = [Process(target=convert_fish, args=np.array(fna)) for fna in fish_num_arrays]
+    # for j in jobs:
+    #    j.start()
         
-    for j in jobs:
-        j.join()
+    # for j in jobs:
+    #    j.join()
+
+    p = Pool(core)
+    p.map(convert_fish, fish_num_array)
 
     t.elapsed('Fish converting')
 
@@ -341,7 +349,10 @@ def clean_version_run_brain_segmentation_unix():
 
 
 if __name__ == "__main__":
-    clean_version_run_brain_segmentation_unix()
+    fish_num_array = np.array([223, 226, 228, 230, 231, 233, 238, 243])
+    convert_fish_in_parallel(fish_num_array)
+
+    # clean_version_run_brain_segmentation_unix()
     # rotate_data_fish200()
     # run_brain_segmentation_unix()
     # run_brain_segmentation()
