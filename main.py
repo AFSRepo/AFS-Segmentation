@@ -35,20 +35,51 @@ def convert_fish(fish_number):
 
 def convert_fish_in_parallel(fish_num_array, core=4):
     t = Timer()
-    
-    # fish_num_arrays = np.array_split(fish_num_array, core)
-
-    # jobs = [Process(target=convert_fish, args=np.array(fna)) for fna in fish_num_arrays]
-    # for j in jobs:
-    #    j.start()
-        
-    # for j in jobs:
-    #    j.join()
 
     p = Pool(core)
     p.map(convert_fish, fish_num_array)
 
     t.elapsed('Fish converting')
+
+
+def get_path_by_name(fish_number, input_dir):
+    for fname in os.listdir(input_dir):
+        path = os.path.join(input_dir, fname)
+        if os.path.isfile(path):
+            if str(fish_number) in path:
+                print path
+                return path
+            else:
+                continue
+
+
+def zoom_chunk_fishes(args):
+    for arg in args:
+        zoom_rotate(arg)
+
+def zoom_in_parallel(fish_num_array, input_dir, core=4):
+    t = Timer()
+    
+    output_path = "/mnt/lsdf/grif/Phenotype_medaka/ProcessedMedaka/%s"
+
+    args = []
+    for fish_num in fish_num_array:
+        args.append(tuple([get_path_by_name(fish_num, input_dir), output_path])) 
+    
+    processes = [Process(target=zoom_rotate, args=(ip,op,)) for ip,op in args]
+
+    for p in processes:
+        p.start()
+
+    for p in processes:
+        p.join()
+
+# p = Pool(core)
+    # p.map(zoom_rotate, args)
+
+    t.elapsed('Zooming global')
+
+
 
 def rotate_data_fish202():
     output_path = "C:\\Users\\Administrator\\Documents\\AFS_results\\fish%d"
@@ -84,8 +115,12 @@ def rotate_data_fish200():
 #FIX!!!!!!!
 
 #FIX!!!!!!!
-def zoom_rotate(input_path, rotate_angle, output_path, rot_axis='z'):
+def zoom_rotate(input_path, output_path, rotate_angle=0, rot_axis='z'):
     t = Timer()
+
+    print "Input: %s" % input_path
+    print "Output: %s" % output_path
+
     input_data = open_data(input_path)
 
     print 'Zooming started...'
@@ -109,9 +144,9 @@ def zoom_rotate(input_path, rotate_angle, output_path, rot_axis='z'):
     if not os.path.exists(output_path % name):
         os.makedirs(output_path % name)
 
-    print 'Output will be: %s' % ((output_path % name) + '\\' + output_file)
+    print 'Output will be: %s' % os.path.join((output_path % name), output_file)
 
-    rotated_data.tofile((output_path % name) + '\\' + output_file)
+    rotated_data.tofile(os.path.join((output_path % name), output_file))
 
     t.elapsed('Zoom and rotation: %s' % input_path)
 
@@ -350,7 +385,10 @@ def clean_version_run_brain_segmentation_unix():
 
 if __name__ == "__main__":
     fish_num_array = np.array([223, 226, 228, 230, 231, 233, 238, 243])
-    convert_fish_in_parallel(fish_num_array)
+    input_dir = "/mnt/lsdf/grif/Phenotype_medaka/Originals"
+
+    zoom_in_parallel(fish_num_array, input_dir)
+    #convert_fish_in_parallel(fish_num_array)
 
     # clean_version_run_brain_segmentation_unix()
     # rotate_data_fish200()
