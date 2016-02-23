@@ -120,34 +120,46 @@ def test_points_rotation3():
     fig = plt.figure()
     ax = fig.add_subplot(111)
     # ax = fig.add_subplot(111, projection='3d')
-    eye_l, eye_r = [1.,3.,5.], [5.,2.,8.]
+    eye_r, eye_l = np.array([263,246,190]), np.array([166,242,208])
+    # eye_r, eye_l = np.array([50,50,50]), np.array([150,150,50])
+    # eye_r, eye_l = np.array([10,20,2]), np.array([70,5,50])
+
     eye_c = np.array([(lv + rv)/2. for lv,rv in zip(eye_l, eye_r)])
+    p = np.array([eye_r, eye_l])
 
-    p = np.array([eye_l, eye_r])
     p_s = p - eye_c
-    print p_s
-    p_s_d = p_s[0] - p_s[1]
 
-    #alpha = -np.arctan(p_s_d[1] / p_s_d[0]) #angle(X, Y)
-    #beta  = -np.arctan(p_s_d[2] / np.sqrt(p_s_d[0]*p_s_d[0] + p_s_d[1]*p_s_d[1]))  # angle(Z, X)
-    beta = get_angle(p_s[0][[0,1]], p_s[0])
-    alpha = get_angle(p_s[0][[0]], p_s[0][[0,1]])
+    print 'Angle and matrix creating...'
+    alpha = get_angle(p_s[0][[0,1]], p_s[0])
+    beta = get_angle(p_s[0][[0]], p_s[0][[0,1]])
 
-    Rz = np.matrix([[np.cos(alpha), -np.sin(alpha), 0.], [np.sin(alpha), np.cos(alpha), 0.], [0., 0., 1.]])
-    Ry = np.matrix([[np.cos(beta), 0., np.sin(beta)], [0., 1., 0.], [-np.sin(beta), 0., np.cos(beta)]])
+    alpha = alpha if np.arctan2(p_s[0][2], p_s[0][0]) >= 0 else -alpha
+    beta = -beta if np.arctan2(p_s[0][1], p_s[0][0]) >= 0 else 2. * np.pi + beta
+
+    print 'alpha = %f' % np.rad2deg(get_angle(p_s[0][[0,1]], p_s[0]))
+    print 'beta = %f' % np.rad2deg(2*np.pi + get_angle(p_s[0][[0]], p_s[0][[0,1]]))
+    print 'atan2 = %f' % np.arctan2(p_s[0][1], p_s[0][0])
+    print 'atan2 = %f' % np.arctan2(p_s[0][2], p_s[0][0])
+
+    Ry = np.matrix([[np.cos(alpha), 0., np.sin(alpha)], [0., 1., 0.], [-np.sin(alpha), 0., np.cos(alpha)]])
+    Rz = np.matrix([[np.cos(beta), -np.sin(beta), 0.], [np.sin(beta), np.cos(beta), 0.], [0., 0., 1.]])
 
     R = Ry * Rz
-    p_r= np.array((R * p_s.T).T + eye_c)
 
     print p_s
     print (R * p_s.T).T
 
-    print 'len old = %f' % (np.sqrt((p[0] - p[1]).dot((p[0] - p[1]))))
-    print 'len new = %f' % (np.sqrt((p_r[0] - p_r[1]).dot((p_r[0] - p_r[1]))))
+    p_sr = (R * p_s.T).T + eye_c
 
-    ax.scatter(eye_c[0], eye_c[2] , c='r', marker='o')
-    ax.scatter(p[:,0], p[:,2], c='b', marker='o')
-    ax.scatter(p_r[:,0], p_r[:,2], c='g', marker='o')
+    ax.scatter(eye_c[2], eye_c[0] , c='r', marker='o')
+    ax.scatter(p[:,2], p[:,0], c='b', marker='o')
+    ax.scatter(p_sr[:,2], p_sr[:,0], c='g', marker='o')
+    # ax.scatter(p2[:,2], p2[:,0], c='m', marker='o')
+
+    # ax.scatter(eye_c[0], eye_c[1] , c='r', marker='o')
+    # ax.scatter(p[:,0], p[:,1], c='b', marker='o')
+    # ax.scatter(p_sr[:,0], p_sr[:,1], c='g', marker='o')
+    #ax.scatter(p2[:,0], p2[:,1], c='m', marker='o')
 
     # ax.scatter(eye_c[0], eye_c[1], eye_c[2] , c='r', marker='o')
     #
@@ -156,9 +168,6 @@ def test_points_rotation3():
     #
     # ax.scatter(p_r[:,0], p_r[:,1], p_r[:,2], c='g', marker='x')
     # ax.plot(p_r[:,0], p_r[:,1], p_r[:,2])
-
-    ax.set_xlim((0,10))
-    ax.set_ylim((0,10))
 
     ax.set_xlabel('X')
     ax.set_ylabel('Y')
@@ -376,7 +385,7 @@ def align_eyes_centroids():
 if __name__ == "__main__":
     #test_points_rotation()
     #test_points_rotation2()
-    #test_points_rotation3()
+    test_points_rotation3()
     #test_fish_alignemnt()
     #get_centroid_at_slice()
-    align_eyes_centroids()
+    #align_eyes_centroids()
