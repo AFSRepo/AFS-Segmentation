@@ -1,7 +1,14 @@
+import os
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from scipy.ndimage import map_coordinates
+from modules.tools.processing import binarizator
+from modules.tools.morphology import object_counter, gather_statistics, extract_largest_area_data
+from modules.segmentation.eyes import eyes_statistics
+from modules.tools.io import create_raw_stack, open_data, create_filename_with_shape, parse_filename
+
+TMP_PATH = "C:\\Users\\Administrator\\Documents\\tmp"
 
 def test_points_rotation():
     fig = plt.figure()
@@ -253,8 +260,123 @@ def test_fish_alignemnt():
     print 'New data saving...'
     new_data.astype(np.uint8).tofile("fish202_rotated_8bit_640x640x146.raw")
 
+def align_by_eyes_centroids(filepath, centroids):
+    data = open_data(filepath)
+    dims = data.shape
+    eye_l, eye_r = centroids
+
+    datac = data.copy()
+    datac[eye_r[2], eye_r[1], eye_r[0]] = 255
+    datac[eye_l[2], eye_l[1], eye_l[0]] = 255
+    datac.astype(np.float32).tofile(os.path.join(TMP_PATH, create_filename_with_shape(filepath, datac.shape, prefix='marked')))
+
+    eye_c = np.array([(lv + rv)/2. for lv,rv in zip(eye_l, eye_r)])
+    p = np.array([eye_l, eye_r])
+    p_s = p - eye_c
+
+    print 'Angle and matrix creating...'
+    alpha = get_angle(p_s[0][[0,1]], p_s[0])
+    beta = -get_angle(p_s[0][[0]], p_s[0][[0,1]])
+
+    Ry = np.matrix([[np.cos(alpha), 0., np.sin(alpha)], [0., 1., 0.], [-np.sin(alpha), 0., np.cos(alpha)]])
+    Rz = np.matrix([[np.cos(beta), -np.sin(beta), 0.], [np.sin(beta), np.cos(beta), 0.], [0., 0., 1.]])
+
+    R = Rz * Ry
+
+    print p_s
+    print (R * p_s.T).T
+
+    p_sr = (R * p_s.T).T + eye_c
+
+    print 'Coords shifting...'
+    zv, yv, xv = np.meshgrid(np.arange(dims[0]), np.arange(dims[1]), np.arange(dims[2]), indexing='ij')
+    coordinates_translated = np.array([np.ravel(xv - eye_c[0]).T, np.ravel(yv - eye_c[1]).T, np.ravel(zv - eye_c[2]).T])
+
+    print 'Rotating...'
+    coordinates_rotated = np.array(R * coordinates_translated)
+
+    print 'Coords back shifting...'
+    coordinates_rotated[0] = coordinates_rotated[0] + eye_c[0]
+    coordinates_rotated[1] = coordinates_rotated[1] + eye_c[1]
+    coordinates_rotated[2] = coordinates_rotated[2] + eye_c[2]
+
+    print 'Reshaping...'
+    z_coordinates = np.reshape(coordinates_rotated[2,:], dims)
+    y_coordinates = np.reshape(coordinates_rotated[1,:], dims)
+    x_coordinates = np.reshape(coordinates_rotated[0,:], dims)
+
+    #get the values for your new coordinates
+    print 'Interpolation in 3D...'
+    interp_data = interp3(np.arange(dims[0]), np.arange(dims[1]), np.arange(dims[2]), data, z_coordinates, y_coordinates, x_coordinates, order=3)
+
+    return interp_data
+
+def get_centroid_at_slice():
+    path_fish202 = "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish202\\fish202_aligned_32bit_320x320x998.raw"
+
+    largest_volume_region = None
+
+    if not os.path.exists(os.path.join(TMP_PATH, "fish202_aligned_32bit_218x228x940.raw")):
+        input_data = np.memmap(path_fish202, dtype=np.float32, shape=(998,320,320)).copy()
+
+        binarized_stack, bbox, eyes_stats = binarizator(input_data)
+        binary_stack_stats, _ = object_counter(binarized_stack)
+        largest_volume_region, largest_volume_region_bbox = extract_largest_area_data(input_data, binary_stack_stats, bb_side_offset=20)
+        largest_volume_region.tofile(os.path.join(TMP_PATH, create_filename_with_shape(path_fish202, largest_volume_region.shape)))
+
+        print 'largest_volume_region_bbox:'
+        print largest_volume_region_bbox
+
+        print 'original shape:'
+        print input_data.shape
+    else:
+        largest_volume_region = np.memmap(os.path.join(TMP_PATH, "fish202_aligned_32bit_218x228x940.raw"), dtype=np.float32, shape=(940,228,218)).copy()
+
+    stack_statistics, _ = gather_statistics(largest_volume_region)
+    eyes_stats = eyes_statistics(stack_statistics)
+
+    print 'Eyes stats:'
+    print eyes_stats
+
+    #let's use 530 slice as tail landmark
+    lmt_slice_idx = 530
+    ext_vol_len = largest_volume_region.shape[0]
+    print 'ext_vol_len = %f' % ext_vol_len
+    eye1_idx_frac, eye2_idx_frac = eyes_stats['com_z'].values[0] / float(ext_vol_len),\
+                                   eyes_stats['com_z'].values[1] / float(ext_vol_len)
+    landmark_tail_idx_frac = lmt_slice_idx / float(ext_vol_len)
+    landmark_tail_idx_eyes_offset = (eye1_idx_frac + eye2_idx_frac)/2.0 - landmark_tail_idx_frac
+
+    print 'eye1_idx_frac = %f' % eye1_idx_frac
+    print 'eye2_idx_frac = %f' % eye2_idx_frac
+    print 'landmark_tail_idx_frac = %f' % landmark_tail_idx_frac
+    print 'landmark_tail_idx_eyes_offset = %f' % landmark_tail_idx_eyes_offset
+    print 'landmark_tail_idx = %f' % (float(eye1_idx_frac * ext_vol_len + eye2_idx_frac * ext_vol_len)/2.0 - landmark_tail_idx_eyes_offset * ext_vol_len)
+
+    #landmark_slice = stats_at_slice(stack_data, lmt_slice_idx)
+
+def align_eyes_centroids():
+    filepath = "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish243\\fish243_32bit_320x320x996.raw"
+
+    input_data = np.memmap(filepath, dtype=np.float32, shape=(996,320,320)).copy()
+
+    stack_statistics, _ = gather_statistics(input_data)
+    eyes_stats = eyes_statistics(stack_statistics)
+
+    print 'Eyes stats:'
+    print eyes_stats
+
+    print 'Aligning by eyes...'
+    eye1_stats, eye2_stats = np.array([eyes_stats['com_x'].values[0], eyes_stats['com_y'].values[0], eyes_stats['com_z'].values[0]]), \
+                             np.array([eyes_stats['com_x'].values[1], eyes_stats['com_y'].values[1], eyes_stats['com_z'].values[1]])
+    aligned_data = align_by_eyes_centroids(filepath, [eye1_stats[::-1], eye2_stats[::-1]])
+    aligned_data.astype(np.float32).tofile(os.path.join(TMP_PATH, create_filename_with_shape(filepath, aligned_data.shape, prefix='aligned-eyes')))
+
+
 if __name__ == "__main__":
     #test_points_rotation()
     #test_points_rotation2()
     #test_points_rotation3()
-    test_fish_alignemnt()
+    #test_fish_alignemnt()
+    #get_centroid_at_slice()
+    align_eyes_centroids()

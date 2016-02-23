@@ -2,12 +2,24 @@ import numpy as np
 from modules.tools.misc import BBox
 from modules.tools.morphology import gather_statistics
 
+def similarity_matrix(stats, column):
+    print stats.shape
+    print stats
+    out = np.empty((stats.shape[0],stats.shape[0]))
+    for i,vali in enumerate(stats[column].values):
+        for j,valj in enumerate(stats[column].values):
+            out[i,j] = float('inf') if i == j else np.abs(vali - valj)
+            
+    return out
+
 def eyes_statistics(stack_statistics, min_area=1000, min_sphericity=0.9):
     eyes_stats = stack_statistics[(stack_statistics['area'] > min_area) & \
                                   (stack_statistics['sphericity'] > min_sphericity)]
-    filtered_eyes_stats = eyes_stats.sort(['sphericity'], ascending=False).head(2)
 
-    return filtered_eyes_stats
+    sm = similarity_matrix(eyes_stats, 'area')
+    i,j = np.unravel_index(sm.argmin(), sm.shape)
+    print i,j
+    return eyes_stats.iloc[[i,j]]
 
 def eyes_zrange(eyes_stats, extra_offset_ratio=0.5):
     if eyes_stats == None:

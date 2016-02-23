@@ -46,15 +46,32 @@ _MEASUREMENTS_EXTRA_VALS_2D = _MEASUREMENTS_EXTRA_2D.values()
 def gather_statistics(stack_data, is_inverse=True):
     thresholded_stack = np.empty_like(stack_data, dtype=np.uint8)
 
+    print 'Gathering statistics...'
+
     for slice_idx in np.arange(stack_data.shape[0]):
         threshold_val = threshold_otsu(stack_data[slice_idx])
         thresholded_stack[slice_idx] = stack_data[slice_idx] < threshold_val if is_inverse \
                                        else stack_data[slice_idx] >= threshold_val
         thresholded_stack[slice_idx] = median_filter(thresholded_stack[slice_idx], size=(1,1))
 
+        if slice_idx % 100 == 0 or slice_idx == stack_data.shape[0]-1:
+            print 'Slice #%d' % slice_idx
+
     stack_statistics, _ = object_counter(thresholded_stack)
 
     return stack_statistics, thresholded_stack
+
+def stats_at_slice(stack_data, slice_idx, biggest_object=True):
+    threshold_val = threshold_otsu(stack_data[slice_idx])
+    thresholded_slice = stack_data[slice_idx] >= threshold_val
+    thresholded_slice = median_filter(thresholded_slice, size=(1,1))
+
+    stack_statistics, _ = object_counter(thresholded_slice)
+    
+    if biggest_object:
+        return stack_statistics.sort(['area'], ascending=False).head(1)
+    else:
+        return stack_statistics
 
 def object_counter(stack_binary_data):
     #labeled_stack, num_labels = label(stack_binary_data, \
