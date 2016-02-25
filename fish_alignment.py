@@ -1,11 +1,15 @@
 import os
 import numpy as np
+import pandas as pd
+import pickle
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from scipy.ndimage import map_coordinates
+from scipy.ndimage.morphology import binary_opening
 from modules.tools.processing import binarizator
-from modules.tools.morphology import object_counter, gather_statistics, extract_largest_area_data
+from modules.tools.morphology import object_counter, gather_statistics, extract_largest_area_data, cell_counter, stats_at_slice
 from modules.segmentation.eyes import eyes_statistics
+from modules.segmentation.common import flip_fish
 from modules.tools.io import create_raw_stack, open_data, create_filename_with_shape, parse_filename
 
 TMP_PATH = "C:\\Users\\Administrator\\Documents\\tmp"
@@ -269,33 +273,109 @@ def test_fish_alignemnt():
     print 'New data saving...'
     new_data.astype(np.uint8).tofile("fish202_rotated_8bit_640x640x146.raw")
 
+def get_rot_matrix_arbitrary_axis(ux, uy, uz, theta):
+    print ux
+    print uy
+    print uz
+    print theta
+    mat = np.matrix([[np.cos(theta) + ux*ux*(1.-np.cos(theta)), \
+                     ux*uy*(1.-np.cos(theta))-uz*np.sin(theta), \
+                     ux*uz*(1.-np.cos(theta))+uy*np.sin(theta)],\
+
+                    [uy*ux*(1.-np.cos(theta))+uz*np.sin(theta), \
+                     np.cos(theta)+uy*uy*(1.-np.cos(theta)), \
+                     uy*uz*(1.-np.cos(theta))-ux*np.sin(theta)], \
+
+                    [uz*ux*(1.-np.cos(theta))-uy*np.sin(theta), \
+                     uz*uy*(1.-np.cos(theta))+ux*np.sin(theta), \
+                     np.cos(theta)+uz*uz*(1.-np.cos(theta))]])
+
+    return mat
+
+def rotate_around_vector(data, origin_point, rot_axis, angle, interp_order=3):
+    dims = data.shape
+
+    print 'origin_point = %s' % str(origin_point)
+    print 'rot_vector = %s' % str(rot_axis)
+
+    R = get_rot_matrix_arbitrary_axis(rot_axis[0], rot_axis[1], rot_axis[2], angle)
+
+    print 'Coords shifting...'
+    zv, yv, xv = np.meshgrid(np.arange(dims[0]), np.arange(dims[1]), np.arange(dims[2]), indexing='ij')
+    coordinates_translated = np.array([np.ravel(xv - origin_point[0]).T, \
+                                       np.ravel(yv - origin_point[1]).T, \
+                                       np.ravel(zv - origin_point[2]).T])
+
+    print 'Rotating...'
+    coordinates_rotated = np.array(R * coordinates_translated)
+
+    print 'Coords back shifting...'
+    coordinates_rotated[0] = coordinates_rotated[0] + origin_point[0]
+    coordinates_rotated[1] = coordinates_rotated[1] + origin_point[1]
+    coordinates_rotated[2] = coordinates_rotated[2] + origin_point[2]
+
+    print 'Reshaping...'
+    x_coordinates = np.reshape(coordinates_rotated[0,:], dims)
+    y_coordinates = np.reshape(coordinates_rotated[1,:], dims)
+    z_coordinates = np.reshape(coordinates_rotated[2,:], dims)
+
+    #get the values for your new coordinates
+    print 'Interpolation in 3D...'
+    interp_data = interp3(np.arange(dims[0]), np.arange(dims[1]), np.arange(dims[2]), data, \
+                          z_coordinates, y_coordinates, x_coordinates, order=interp_order)
+
+    return interp_data
+
 def align_by_eyes_centroids(filepath, centroids):
     data = open_data(filepath)
     dims = data.shape
     eye_l, eye_r = centroids
 
-    datac = data.copy()
-    datac[eye_r[2], eye_r[1], eye_r[0]] = 255
-    datac[eye_l[2], eye_l[1], eye_l[0]] = 255
-    datac.astype(np.float32).tofile(os.path.join(TMP_PATH, create_filename_with_shape(filepath, datac.shape, prefix='marked')))
-
     eye_c = np.array([(lv + rv)/2. for lv,rv in zip(eye_l, eye_r)])
     p = np.array([eye_l, eye_r])
     p_s = p - eye_c
 
+    datac = data.copy()
+    datac[eye_r[2], eye_r[1], eye_r[0]] = 255
+    datac[eye_l[2], eye_l[1], eye_l[0]] = 255
+    datac[eye_c[2], eye_c[1], eye_c[0]] = 255
+    datac.astype(np.float32).tofile(os.path.join(TMP_PATH, create_filename_with_shape(filepath, datac.shape, prefix='marked')))
+
     print 'Angle and matrix creating...'
     alpha = get_angle(p_s[0][[0,1]], p_s[0])
-    beta = -get_angle(p_s[0][[0]], p_s[0][[0,1]])
+    beta = get_angle(p_s[0][[0]], p_s[0][[0,1]])
 
-    Ry = np.matrix([[np.cos(alpha), 0., np.sin(alpha)], [0., 1., 0.], [-np.sin(alpha), 0., np.cos(alpha)]])
+    x1, y1 = p_s[0][[0,1]]
+    x2, y2, z2 = p_s[0]
+
+    x_axis_vec = np.array([1.,0.,0.])
+    theta = np.arccos(p_s[0][0]/np.sqrt(p_s[0].dot(p_s[0])))
+
+    alpha_axis = np.cross(p_s[0], x_axis_vec)
+    alpha_axis = alpha_axis / np.linalg.norm(alpha_axis)
+    print alpha_axis
+
+    Rcross = get_rot_matrix_arbitrary_axis(alpha_axis[0], alpha_axis[1], alpha_axis[2], -theta)
     Rz = np.matrix([[np.cos(beta), -np.sin(beta), 0.], [np.sin(beta), np.cos(beta), 0.], [0., 0., 1.]])
 
-    R = Rz * Ry
+    R = Rcross
 
+    print R.shape
+    print Rcross.shape
+
+    print 'Old eye\'s coords:'
     print p_s
+    print 'New eye\'s coords:'
     print (R * p_s.T).T
 
-    p_sr = (R * p_s.T).T + eye_c
+    p_sr = np.asarray((R * p_s.T).T + eye_c)
+
+    # fig = plt.figure()
+    # ax = fig.add_subplot(111)
+    # ax.scatter(eye_c[2], eye_c[0] , c='r', marker='o')
+    # ax.scatter(p[:,2], p[:,0], c='b', marker='o')
+    # ax.scatter(p_sr[:,2], p_sr[:,0], c='g', marker='o')
+    # plt.show()
 
     print 'Coords shifting...'
     zv, yv, xv = np.meshgrid(np.arange(dims[0]), np.arange(dims[1]), np.arange(dims[2]), indexing='ij')
@@ -318,7 +398,13 @@ def align_by_eyes_centroids(filepath, centroids):
     print 'Interpolation in 3D...'
     interp_data = interp3(np.arange(dims[0]), np.arange(dims[1]), np.arange(dims[2]), data, z_coordinates, y_coordinates, x_coordinates, order=3)
 
-    return interp_data
+    print p_sr[0]
+    print interp_data.shape
+
+    interp_data[int(p_sr[0,2]), int(p_sr[0,1]), int(p_sr[0,0])] = 255
+    interp_data[int(p_sr[1,2]), int(p_sr[1,1]), int(p_sr[1,0])] = 255
+
+    return interp_data, eye_c
 
 def get_centroid_at_slice():
     path_fish202 = "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish202\\fish202_aligned_32bit_320x320x998.raw"
@@ -344,6 +430,8 @@ def get_centroid_at_slice():
     stack_statistics, _ = gather_statistics(largest_volume_region)
     eyes_stats = eyes_statistics(stack_statistics)
 
+    eye_c = np.round([eyes_stats['com_x'].mean(), eyes_stats['com_y'].mean(), eyes_stats['com_z'].mean()]).astype(np.int32)
+
     print 'Eyes stats:'
     print eyes_stats
 
@@ -362,30 +450,211 @@ def get_centroid_at_slice():
     print 'landmark_tail_idx_eyes_offset = %f' % landmark_tail_idx_eyes_offset
     print 'landmark_tail_idx = %f' % (float(eye1_idx_frac * ext_vol_len + eye2_idx_frac * ext_vol_len)/2.0 - landmark_tail_idx_eyes_offset * ext_vol_len)
 
-    #landmark_slice = stats_at_slice(stack_data, lmt_slice_idx)
+    landmark_tail_idx = int(float(eye1_idx_frac * ext_vol_len + eye2_idx_frac * ext_vol_len)/2.0 - landmark_tail_idx_eyes_offset * ext_vol_len)
+
+    #z -> y
+    #y -> x
+    lm_slice_stats, lm_labeled_slice = stats_at_slice(largest_volume_region, landmark_tail_idx)
+
+    z_axis_vec = np.array([0., 0., -1.])
+    spinal_vec = np.array([0, lm_slice_stats['com_z'] - eye_c[1], landmark_tail_idx - eye_c[2]])
+
+    rot_axis = np.cross(z_axis_vec, spinal_vec)
+    rot_axis = rot_axis / np.linalg.norm(rot_axis)
+
+    theta = np.arccos(z_axis_vec.dot(spinal_vec)/(np.sqrt(z_axis_vec.dot(z_axis_vec)) * np.sqrt(spinal_vec.dot(spinal_vec))))
+
+    data_rotated = rotate_around_vector(largest_volume_region, eye_c, rot_axis, -theta, interp_order=3)
+    data_rotated.astype(np.float32).tofile(os.path.join(TMP_PATH, create_filename_with_shape(path_fish202, data_rotated.shape, prefix='zrotated')))
+
+    print 'z_axis_vec = %s' % str(z_axis_vec)
+    print 'spinal_vec = %s' % str(spinal_vec)
+    print 'theta = %f' % np.rad2deg(theta)
+    print lm_slice_stats
+
+def align_tail_part(filepath, landmark_tail_idx_frac=0.56383, spinal_angle=0.12347):
+    input_data = open_data(filepath)
+
+    binarized_stack, bbox, eyes_stats = binarizator(input_data)
+
+    print 'Bin saved...'
+    binary_stack_stats, _ = object_counter(binarized_stack)
+    largest_volume_region, largest_volume_region_bbox = extract_largest_area_data(input_data, binary_stack_stats, bb_side_offset=20)
+    largest_volume_region.astype(np.float32).tofile(os.path.join(TMP_PATH, create_filename_with_shape(filepath, largest_volume_region.shape, prefix='-binary')))
+    binarized_stack[largest_volume_region_bbox].tofile(os.path.join(TMP_PATH, create_filename_with_shape(filepath, binarized_stack[largest_volume_region_bbox].shape, prefix='-binarymask')))
+
+    stack_statistics, _ = gather_statistics(largest_volume_region)
+    eyes_stats = eyes_statistics(stack_statistics)
+
+    eye_c = np.round([eyes_stats['com_x'].mean(), eyes_stats['com_y'].mean(), eyes_stats['com_z'].mean()]).astype(np.int32)
+    print largest_volume_region.shape
+
+    ext_vol_len = largest_volume_region.shape[0]
+    eye1_idx_frac, eye2_idx_frac = eyes_stats['com_z'].values[0] / float(ext_vol_len),\
+                                   eyes_stats['com_z'].values[1] / float(ext_vol_len)
+
+    landmark_tail_idx = int(ext_vol_len * landmark_tail_idx_frac)
+
+    lm_slice_stats, lm_labeled_slice = stats_at_slice(largest_volume_region, landmark_tail_idx)
+
+    z_axis_vec = np.array([0., 0., -1.])
+    tail_com_y, tail_com_z = lm_slice_stats['com_z'].values[0] - eye_c[1], landmark_tail_idx - eye_c[2]
+    print 'tail_com_y = %s' % str(tail_com_y)
+    print 'tail_com_z = %s' % str(tail_com_z)
+    spinal_vec = np.array([0, tail_com_y, tail_com_z])
+
+    rot_axis = np.cross(z_axis_vec, spinal_vec)
+    rot_axis = rot_axis / np.linalg.norm(rot_axis)
+
+    theta = np.arccos(z_axis_vec.dot(spinal_vec)/(np.sqrt(z_axis_vec.dot(z_axis_vec)) * np.sqrt(spinal_vec.dot(spinal_vec))))
+
+    if tail_com_y < 0:
+        theta = -(theta - spinal_angle) if theta > spinal_angle else (spinal_angle - theta)
+    else:
+        theta = theta + spinal_angle
+
+    data_rotated = rotate_around_vector(largest_volume_region, eye_c, rot_axis, theta, interp_order=3)
+
+    return data_rotated
+
+def archive_eyes(eyes_list, filepath):
+    eyes_dump_out = open(filepath, 'wb')
+    pickle.dump(eyes_list, eyes_dump_out)
+    eyes_dump_out.close()
+
+    print 'Eyes archived in: %s' % eyes_dump_out
+
+def dearchive_eyes(filepath):
+    eyes_file = open(filepath, 'rb')
+    eyes_list = pickle.load(eyes_file)
+    eyes_file.close()
+
+    return eyes_list
+
+def create_archive_eyes_path(filepath):
+    name, bits, size, ext = parse_filename(filepath)
+    return os.path.join(TMP_PATH, '%s_eyes.pkl' % name)
+
+def check_depth_orientation():
+    filepath = os.path.join(TMP_PATH, "fish243_aligned-eyes_32bit_320x320x996.raw")
+    data = open_data(filepath)
+
+    stack_statistics, _ = gather_statistics(data)
+    eyes_stats = eyes_statistics(stack_statistics)
+
+    flipped_data = flip_fish(data, eyes_stats)
+    flipped_data.astype(np.float32).tofile(os.path.join(TMP_PATH, create_filename_with_shape(filepath, flipped_data.shape, prefix='-flipped')))
+
+def check_vertical_orientation():
+    filepath = os.path.join(TMP_PATH, "fish243_aligned-eyes_aligned-eyes-flipped_32bit_320x320x996.raw")
+    data = open_data(filepath).copy()
+
+    stack_statistics, _ = gather_statistics(data)
+    eyes_stats = eyes_statistics(stack_statistics)
+
+    eye_c = np.round([eyes_stats['com_x'].mean(), eyes_stats['com_y'].mean(), eyes_stats['com_z'].mean()]).astype(np.int32)
+    print eye_c
+
+    avg_eye_size = np.round(np.mean([eyes_stats['bb_width'].mean(), eyes_stats['bb_height'].mean(), eyes_stats['bb_depth'].mean()]))
+    print avg_eye_size
+
+    z_shift = avg_eye_size * 2
+
+    #z -> y
+    #y -> x
+    head_slice_stats, head_labeled_slice = stats_at_slice(data, eye_c[2] - z_shift)
+
+    central_head_part = head_labeled_slice[head_slice_stats['bb_z']:head_slice_stats['bb_z']+head_slice_stats['bb_depth'],\
+                                           head_slice_stats['bb_y']:head_slice_stats['bb_y']+head_slice_stats['bb_height']]
+    top_part, bottom_part = central_head_part[:central_head_part.shape[0]/2,:], central_head_part[central_head_part.shape[0]/2+1:,:]
+    top_part, bottom_part = binary_opening(top_part, iterations=2), binary_opening(bottom_part, iterations=2)
+    non_zeros_top, non_zeros_bottom = np.count_nonzero(top_part), np.count_nonzero(bottom_part)
+
+    print non_zeros_top
+    print non_zeros_bottom
+
+    if non_zeros_top < non_zeros_bottom:
+        print 'Volume should be vertically flipped.'
+        data = data[:,::-1,:]
+
+    data.astype(np.float32).tofile(os.path.join(TMP_PATH, create_filename_with_shape(filepath, data.shape, prefix='-vertically-flipped')))
+
+    #central_head_part = binary_opening(central_head_part, iterations=0)
+    #print head_slice_stats
+
+    #plt.imshow(central_head_part)
+    #plt.show()
+
+def flip_horizontally():
+    #filepath = os.path.join(TMP_PATH, "fish243_aligned-eyes_32bit_320x320x996.raw")
+    filepath = os.path.join(TMP_PATH, "fish243_aligned-eyes_32bit_320x320x996.raw")
+    input_data = open_data(filepath)
+
+    total_stats = pd.DataFrame()
+
+    binarized_stack, _, _ = binarizator(input_data)
+
+    for idx, slice_data in enumerate(binarized_stack):
+        if idx % 100 == 0 or idx == binarized_stack.shape[0]-1:
+            print 'Slice #%d' % idx
+
+        if slice_data.any():
+            stats, labels = cell_counter(slice_data, slice_index=idx)
+            total_stats = total_stats.append(stats, ignore_index=True)
+
+
+    print total_stats
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    ax.plot(total_stats['slice_idx'], total_stats['com_z'])
+    plt.show()
 
 def align_eyes_centroids():
     filepath = "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish243\\fish243_32bit_320x320x996.raw"
 
-    input_data = np.memmap(filepath, dtype=np.float32, shape=(996,320,320)).copy()
+    eyes_stats_list = None
+    eyes_archive_path = create_archive_eyes_path(filepath)
 
-    stack_statistics, _ = gather_statistics(input_data)
-    eyes_stats = eyes_statistics(stack_statistics)
+    print eyes_archive_path
 
-    print 'Eyes stats:'
-    print eyes_stats
+    if not os.path.exists(eyes_archive_path):
+        input_data = np.memmap(filepath, dtype=np.float32, shape=(996,320,320)).copy()
+        stack_statistics, _ = gather_statistics(input_data)
+        eyes_stats = eyes_statistics(stack_statistics)
 
-    print 'Aligning by eyes...'
-    eye1_stats, eye2_stats = np.array([eyes_stats['com_x'].values[0], eyes_stats['com_y'].values[0], eyes_stats['com_z'].values[0]]), \
+        print 'Eyes stats:'
+        print eyes_stats
+
+        print 'Aligning by eyes...'
+        eye1_com, eye2_com = np.array([eyes_stats['com_x'].values[0], eyes_stats['com_y'].values[0], eyes_stats['com_z'].values[0]]), \
                              np.array([eyes_stats['com_x'].values[1], eyes_stats['com_y'].values[1], eyes_stats['com_z'].values[1]])
-    aligned_data = align_by_eyes_centroids(filepath, [eye1_stats[::-1], eye2_stats[::-1]])
-    aligned_data.astype(np.float32).tofile(os.path.join(TMP_PATH, create_filename_with_shape(filepath, aligned_data.shape, prefix='aligned-eyes')))
+        eyes_coms = [eye1_com, eye2_com]
 
+        eye1_sbbox, eye2_sbbox = np.array([eyes_stats['bb_width'].values[0], eyes_stats['bb_height'].values[0], eyes_stats['bb_depth'].values[0]]), \
+                                 np.array([eyes_stats['bb_width'].values[1], eyes_stats['bb_height'].values[1], eyes_stats['bb_depth'].values[1]])
+        eyes_sizes = [eye1_sbbox, eye2_sbbox]
+
+        archive_eyes([eyes_coms, eyes_sizes], eyes_archive_path)
+    else:
+        eyes_stats_list = dearchive_eyes(eyes_archive_path)
+
+    print eyes_stats_list
+
+    aligned_data, eye_c = align_by_eyes_centroids(filepath, eyes_stats_list[0])
+    print eye_c
+    aligned_data.astype(np.float32).tofile(os.path.join(TMP_PATH, create_filename_with_shape(filepath, aligned_data.shape, prefix='aligned-eyes')))
 
 if __name__ == "__main__":
     #test_points_rotation()
     #test_points_rotation2()
-    test_points_rotation3()
+    #test_points_rotation3()
     #test_fish_alignemnt()
     #get_centroid_at_slice()
+
     #align_eyes_centroids()
+    #flip_horizontally()
+    #check_depth_orientation()
+    #check_vertical_orientation()
+    filepath = os.path.join(TMP_PATH, "fish243_aligned-eyes_aligned-eyes-flipped_-vertically-flipped_32bit_320x320x996.raw")
+    aligned_data = align_tail_part(filepath)
+    aligned_data.astype(np.float32).tofile(os.path.join(TMP_PATH, create_filename_with_shape(filepath, aligned_data.shape, prefix='TOTAL')))

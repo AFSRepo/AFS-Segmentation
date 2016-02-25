@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+from operator import attrgetter
 
 from skimage.filters import threshold_otsu, threshold_li
 from scipy.ndimage.morphology import binary_closing, binary_fill_holes, generate_binary_structure
@@ -7,6 +8,7 @@ from scipy.ndimage.measurements import label, find_objects, center_of_mass
 from scipy.ndimage.filters import median_filter
 from skimage.measure import regionprops
 from misc import BBox
+
 
 _MEASUREMENTS = {
     'Label': 'label',
@@ -61,17 +63,21 @@ def gather_statistics(stack_data, is_inverse=True):
 
     return stack_statistics, thresholded_stack
 
-def stats_at_slice(stack_data, slice_idx, biggest_object=True):
+def stats_at_slice(stack_data, slice_idx, preserve_big_objects=True):
     threshold_val = threshold_otsu(stack_data[slice_idx])
     thresholded_slice = stack_data[slice_idx] >= threshold_val
     thresholded_slice = median_filter(thresholded_slice, size=(1,1))
 
-    stack_statistics, _ = object_counter(thresholded_slice)
-    
-    if biggest_object:
-        return stack_statistics.sort(['area'], ascending=False).head(1)
-    else:
-        return stack_statistics
+    if preserve_big_objects:
+        labeled_slice, num_labels = label(thresholded_slice)
+        max_area_label = max(regionprops(labeled_slice), key=attrgetter('area')).label
+        labeled_slice[labeled_slice != max_area_label] = 0
+        labeled_slice[labeled_slice == max_area_label] = 1
+        thresholded_slice = labeled_slice
+
+    stack_statistics, labeled_slice = cell_counter(thresholded_slice, slice_index=slice_idx)
+
+    return stack_statistics, labeled_slice
 
 def object_counter(stack_binary_data):
     #labeled_stack, num_labels = label(stack_binary_data, \

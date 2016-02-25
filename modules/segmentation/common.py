@@ -2931,7 +2931,7 @@ def align_fish_simple_ants(working_env, fixed_image_path, moving_image_path, out
         sys.exit(1)
 
     shell_app = "bash "
-    
+
     args_fmt = {'out_name': output_name, 'warped_path': warped_path, \
                 'iwarped_path': iwarped_path, \
                 'fixedImagePath': fixed_image_path, \
@@ -3133,7 +3133,12 @@ def split_fish(stack_data, stack_labels):
 def flip_fish(stack_data, eyes_stats, is_tail_fisrt=True):
     data_shape = stack_data.shape
 
-    eyes_z_pos = eyes_stats['com_z'].mean()
+    eyes_z_pos = -1
+
+    if isinstance(eyes_stats, list) or isinstance(eyes_stats, np.ndarray):
+        eyes_z_pos = (eyes_stats[0][2] + eyes_stats[1][2]) / 2.
+    else:
+        eyes_z_pos = eyes_stats['com_z'].mean()
 
     if (data_shape[0]/2.0 > eyes_z_pos):
         return stack_data[::-1,:,:] if is_tail_fisrt else stack_data
