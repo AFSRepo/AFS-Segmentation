@@ -187,19 +187,47 @@ def cell_counter(slice_binary_data, min_area=0.0, min_circularity=0.0, slice_ind
 
     return filtered_stats, labeled_data
 
-def extract_data_by_label(stack_data, stack_stats, label, bb_side_offset=0):
+def extract_data_by_label(stack_data, stack_stats, label, bb_side_offset=0, \
+                          force_bbox_fit=True, pad_data=False, \
+                          extact_axes=(0,1,2)):
     filtered_stats = stack_stats[stack_stats['label'] == label].head(1)
     bbox = BBox(filtered_stats.to_dict('records')[0])
     print "extracted_data_by_label = %s" % str(filtered_stats.to_dict('records')[0])
-    tuple_bbox = bbox.create_tuple(offset=bb_side_offset, max_ranges=stack_data.shape)
 
-    return stack_data[bbox.create_tuple(offset=bb_side_offset)], tuple_bbox
+    tuple_bbox = None
 
-def extract_largest_area_data(stack_data, stack_stats, bb_side_offset=0):
+    if force_bbox_fit:
+        tuple_bbox = bbox.create_tuple(offset=bb_side_offset, max_ranges=stack_data.shape)
+    else:
+        tuple_bbox = bbox.create_tuple(offset=bb_side_offset)
+
+    if pad_data:
+        z_begin_pad, z_end_pad = np.abs(tuple_bbox[0].start) if tuple_bbox[0].start < 0 else 0, \
+                                 tuple_bbox[0].stop - stack_data.shape[0] \
+                                        if tuple_bbox[0].stop > stack_data.shape[0] else 0
+        y_begin_pad, y_end_pad = np.abs(tuple_bbox[1].start) if tuple_bbox[1].start < 0 else 0, \
+                                 tuple_bbox[1].stop - stack_data.shape[1] \
+                                        if tuple_bbox[1].stop > stack_data.shape[1] else 0
+        x_begin_pad, x_end_pad = np.abs(tuple_bbox[2].start) if tuple_bbox[2].start < 0 else 0, \
+                                 tuple_bbox[2].stop - stack_data.shape[2] \
+                                        if tuple_bbox[2].stop > stack_data.shape[2] else 0
+        padding_sides = tuple([tuple([z_begin_pad, z_end_pad]), \
+                               tuple([y_begin_pad, y_end_pad]), \
+                               tuple([x_begin_pad, x_end_pad])])
+        print 'Padding: %s' % str(padding_sides)
+        stack_data = np.pad(stack_data, padding_sides, mode='constant')
+
+    extration_bbox = tuple([s if i in extact_axes else np.s_[:] for i,s in enumerate(tuple_bbox)])
+
+    return stack_data[extration_bbox], tuple_bbox
+
+def extract_largest_area_data(stack_data, stack_stats, bb_side_offset=0, \
+                                force_bbox_fit=True, pad_data=False, extact_axes=(0,1,2)):
     filtered_stats = stack_stats.sort(['area'], ascending=False).head(1)
 
     return extract_data_by_label(stack_data, stack_stats, \
-            filtered_stats['label'].values[0], bb_side_offset=bb_side_offset)
+            filtered_stats['label'].values[0], bb_side_offset=bb_side_offset, \
+                force_bbox_fit=force_bbox_fit, pad_data=pad_data, extact_axes=extact_axes)
 
 def _calc_sphericity(area, perimeter):
     r = ((3.0 * area) / (4.0 * np.pi)) ** (1.0/3.0)

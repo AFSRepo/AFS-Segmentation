@@ -416,8 +416,10 @@ def get_centroid_at_slice():
 
         binarized_stack, bbox, eyes_stats = binarizator(input_data)
         binary_stack_stats, _ = object_counter(binarized_stack)
-        largest_volume_region, largest_volume_region_bbox = extract_largest_area_data(input_data, binary_stack_stats, bb_side_offset=20)
-        largest_volume_region.tofile(os.path.join(TMP_PATH, create_filename_with_shape(path_fish202, largest_volume_region.shape)))
+        largest_volume_region, largest_volume_region_bbox = extract_largest_area_data(input_data, binary_stack_stats, bb_side_offset=50, force_bbox_fit=False, pad_data=True)
+        print 'largest_volume_region_bbox = %s' % str(largest_volume_region_bbox)
+        largest_volume_region.astype(np.float32).tofile(os.path.join(TMP_PATH, create_filename_with_shape(path_fish202, largest_volume_region.shape, prefix='largest-volume-region50ffset')))
+        binarized_stack[largest_volume_region_bbox].astype(np.uint8).tofile(os.path.join(TMP_PATH, create_filename_with_shape(path_fish202, binarized_stack[largest_volume_region_bbox].shape, prefix='-binarymask50ffset')))
 
         print 'largest_volume_region_bbox:'
         print largest_volume_region_bbox
@@ -459,6 +461,11 @@ def get_centroid_at_slice():
     z_axis_vec = np.array([0., 0., -1.])
     spinal_vec = np.array([0, lm_slice_stats['com_z'] - eye_c[1], landmark_tail_idx - eye_c[2]])
 
+    tail_com_y, tail_com_z = lm_slice_stats['com_z'].values[0] - eye_c[1], landmark_tail_idx - eye_c[2]
+    print '###tail_com_y = %s' % str(tail_com_y)
+    print '###tail_com_z = %s' % str(tail_com_z)
+    print '###centroid_coord = %s' % str([eye_c[0], lm_slice_stats['com_z'].values[0]])
+
     rot_axis = np.cross(z_axis_vec, spinal_vec)
     rot_axis = rot_axis / np.linalg.norm(rot_axis)
 
@@ -479,28 +486,32 @@ def align_tail_part(filepath, landmark_tail_idx_frac=0.56383, spinal_angle=0.123
 
     print 'Bin saved...'
     binary_stack_stats, _ = object_counter(binarized_stack)
-    largest_volume_region, largest_volume_region_bbox = extract_largest_area_data(input_data, binary_stack_stats, bb_side_offset=20)
-    largest_volume_region.astype(np.float32).tofile(os.path.join(TMP_PATH, create_filename_with_shape(filepath, largest_volume_region.shape, prefix='-binary')))
-    binarized_stack[largest_volume_region_bbox].tofile(os.path.join(TMP_PATH, create_filename_with_shape(filepath, binarized_stack[largest_volume_region_bbox].shape, prefix='-binarymask')))
+    largest_volume_region, largest_volume_region_bbox = extract_largest_area_data(input_data, binary_stack_stats, bb_side_offset=50, force_bbox_fit=False, pad_data=True, extact_axes=(0,))
+
+    # largest_volume_region, largest_volume_region_bbox = extract_largest_area_data(input_data, binary_stack_stats, bb_side_offset=0)
+    largest_volume_region.astype(np.float32).tofile(os.path.join(TMP_PATH, create_filename_with_shape(filepath, largest_volume_region.shape, prefix='-largest_volume_region50ffset')))
+    binarized_stack[largest_volume_region_bbox].astype(np.uint8).tofile(os.path.join(TMP_PATH, create_filename_with_shape(filepath, binarized_stack[largest_volume_region_bbox].shape, prefix='-binarymask0ffset')))
 
     stack_statistics, _ = gather_statistics(largest_volume_region)
     eyes_stats = eyes_statistics(stack_statistics)
 
     eye_c = np.round([eyes_stats['com_x'].mean(), eyes_stats['com_y'].mean(), eyes_stats['com_z'].mean()]).astype(np.int32)
-    print largest_volume_region.shape
+    print 'eye_c = %s' % str(eye_c)
+    print 'largest_volume_region.shape = %s' % str(largest_volume_region.shape)
 
     ext_vol_len = largest_volume_region.shape[0]
     eye1_idx_frac, eye2_idx_frac = eyes_stats['com_z'].values[0] / float(ext_vol_len),\
                                    eyes_stats['com_z'].values[1] / float(ext_vol_len)
 
     landmark_tail_idx = int(ext_vol_len * landmark_tail_idx_frac)
-
+    print 'landmark_tail_idx = %d' % landmark_tail_idx
     lm_slice_stats, lm_labeled_slice = stats_at_slice(largest_volume_region, landmark_tail_idx)
 
     z_axis_vec = np.array([0., 0., -1.])
     tail_com_y, tail_com_z = lm_slice_stats['com_z'].values[0] - eye_c[1], landmark_tail_idx - eye_c[2]
     print 'tail_com_y = %s' % str(tail_com_y)
     print 'tail_com_z = %s' % str(tail_com_z)
+    print 'centroid_coord = %s' % str([eye_c[0], lm_slice_stats['com_z'].values[0]])
     spinal_vec = np.array([0, tail_com_y, tail_com_z])
 
     rot_axis = np.cross(z_axis_vec, spinal_vec)
@@ -509,13 +520,18 @@ def align_tail_part(filepath, landmark_tail_idx_frac=0.56383, spinal_angle=0.123
     theta = np.arccos(z_axis_vec.dot(spinal_vec)/(np.sqrt(z_axis_vec.dot(z_axis_vec)) * np.sqrt(spinal_vec.dot(spinal_vec))))
 
     if tail_com_y < 0:
-        theta = -(theta - spinal_angle) if theta > spinal_angle else (spinal_angle - theta)
+        theta = (theta - spinal_angle) if theta > spinal_angle else -(spinal_angle - theta)
     else:
         theta = theta + spinal_angle
 
-    data_rotated = rotate_around_vector(largest_volume_region, eye_c, rot_axis, theta, interp_order=3)
+    data_rotated = rotate_around_vector(largest_volume_region, eye_c, rot_axis, -theta, interp_order=3)
 
-    return data_rotated
+    print 'Bin saved...'
+    data_rotated_binarized_stack, _, _ = binarizator(data_rotated)
+    data_rotated_binary_stack_stats, _ = object_counter(data_rotated_binarized_stack)
+    largest_data_rotated_region, _ = extract_largest_area_data(data_rotated, data_rotated_binary_stack_stats, bb_side_offset=50, force_bbox_fit=False, pad_data=True)
+
+    return largest_data_rotated_region
 
 def archive_eyes(eyes_list, filepath):
     eyes_dump_out = open(filepath, 'wb')
@@ -644,17 +660,46 @@ def align_eyes_centroids():
     print eye_c
     aligned_data.astype(np.float32).tofile(os.path.join(TMP_PATH, create_filename_with_shape(filepath, aligned_data.shape, prefix='aligned-eyes')))
 
+
+def rotation_test():
+    z_axis_vec = np.array([0.,0.,-1])
+    spinal_vec = np.array([0., -5., -5.])
+
+    directions = np.array([[0.,6.,-2],[0.,3.,-4.],[0.,1.,-5.],[0.,-1.,-5],[0.,-6.,-3.]])
+
+    def get_theta(y, theta, spinal_angle=np.deg2rad(45.)):
+        if y < 0:
+            theta = (theta - spinal_angle) if theta > spinal_angle else -(spinal_angle - theta)
+        else:
+            theta = theta + spinal_angle
+
+        return theta
+
+    for spinal_vec in directions:
+        rot_axis = np.cross(z_axis_vec, spinal_vec)
+        rot_axis = rot_axis / np.linalg.norm(rot_axis)
+
+        angle_vec = np.arccos(z_axis_vec.dot(spinal_vec)/(np.sqrt(z_axis_vec.dot(z_axis_vec)) * np.sqrt(spinal_vec.dot(spinal_vec))))
+        theta = get_theta(spinal_vec[1], angle_vec)
+        #print '%s = %f' % (str(spinal_vec), np.rad2deg(theta))
+        R = get_rot_matrix_arbitrary_axis(rot_axis[0], rot_axis[1], rot_axis[2], -theta)
+        new_vec = (R * np.matrix(spinal_vec).T).T
+        print '%s => %s : %f' % (str(np.array(spinal_vec)), str(np.array(new_vec)), np.rad2deg(theta))
+
 if __name__ == "__main__":
     #test_points_rotation()
     #test_points_rotation2()
     #test_points_rotation3()
     #test_fish_alignemnt()
-    #get_centroid_at_slice()
+    get_centroid_at_slice()
 
     #align_eyes_centroids()
     #flip_horizontally()
     #check_depth_orientation()
     #check_vertical_orientation()
+
     filepath = os.path.join(TMP_PATH, "fish243_aligned-eyes_aligned-eyes-flipped_-vertically-flipped_32bit_320x320x996.raw")
     aligned_data = align_tail_part(filepath)
-    aligned_data.astype(np.float32).tofile(os.path.join(TMP_PATH, create_filename_with_shape(filepath, aligned_data.shape, prefix='TOTAL')))
+    aligned_data.astype(np.float32).tofile(os.path.join(TMP_PATH, create_filename_with_shape(filepath, aligned_data.shape, prefix='TOTALPREVENTLEAKING')))
+
+    #rotation_test()
