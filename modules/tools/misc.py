@@ -100,3 +100,15 @@ class Timer(object):
     def elapsed(self, title):
         self.stop = time.time()
         print "Elapsed time (%s):%f sec" % (title, self.stop - self.start)
+
+#http://stackoverflow.com/questions/5478351/python-time-measure-function
+def timing(f):
+    def wrap(*args):
+        print '%s has started execution.' % f.func_name
+        time1 = time.time()
+        ret = f(*args)
+        time2 = time.time()
+        residual = time2 - time1
+        print '%s function took %0.3f ms ~= %0.2f sec ~= %0.2f min.' % (f.func_name, residual * 1000., residual, residual / 60.)
+        return ret
+    return wrap

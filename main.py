@@ -59,13 +59,13 @@ def zoom_chunk_fishes(args):
 
 def zoom_in_parallel(fish_num_array, input_dir, core=4):
     t = Timer()
-    
+
     output_path = "/mnt/lsdf/grif/Phenotype_medaka/ProcessedMedaka/%s"
 
     args = []
     for fish_num in fish_num_array:
-        args.append(tuple([get_path_by_name(fish_num, input_dir), output_path])) 
-    
+        args.append(tuple([get_path_by_name(fish_num, input_dir), output_path]))
+
     processes = [Process(target=zoom_rotate, args=(ip,op,)) for ip,op in args]
 
     for p in processes:

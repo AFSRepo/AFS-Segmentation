@@ -3130,21 +3130,6 @@ def split_fish(stack_data, stack_labels):
 
     return abdomen_data_part, head_data_part
 
-def flip_fish(stack_data, eyes_stats, is_tail_fisrt=True):
-    data_shape = stack_data.shape
-
-    eyes_z_pos = -1
-
-    if isinstance(eyes_stats, list) or isinstance(eyes_stats, np.ndarray):
-        eyes_z_pos = (eyes_stats[0][2] + eyes_stats[1][2]) / 2.
-    else:
-        eyes_z_pos = eyes_stats['com_z'].mean()
-
-    if (data_shape[0]/2.0 > eyes_z_pos):
-        return stack_data[::-1,:,:] if is_tail_fisrt else stack_data
-    else:
-        return stack_data if not is_tail_fisrt else stack_data[::-1,:,:]
-
 def _zoom_bbox(bbox, scale):
     return tuple([slice(int(round(v.start * scale)), \
                         int(round(v.stop * scale)), \

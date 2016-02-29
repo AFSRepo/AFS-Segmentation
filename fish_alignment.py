@@ -6,14 +6,12 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from scipy.ndimage import map_coordinates
 from scipy.ndimage.morphology import binary_opening
-from modules.tools.processing import binarizator
+from modules.tools.processing import binarizator, align_fish_by_eyes_tail
 from modules.tools.morphology import object_counter, gather_statistics, extract_largest_area_data, cell_counter, stats_at_slice
 from modules.segmentation.eyes import eyes_statistics
-from modules.segmentation.common import flip_fish
 from modules.tools.io import create_raw_stack, open_data, create_filename_with_shape, parse_filename
 
 TMP_PATH = "C:\\Users\\Administrator\\Documents\\tmp"
-
 def test_points_rotation():
     fig = plt.figure()
     #ax = fig.add_subplot(111, projection='3d')
@@ -274,10 +272,6 @@ def test_fish_alignemnt():
     new_data.astype(np.uint8).tofile("fish202_rotated_8bit_640x640x146.raw")
 
 def get_rot_matrix_arbitrary_axis(ux, uy, uz, theta):
-    print ux
-    print uy
-    print uz
-    print theta
     mat = np.matrix([[np.cos(theta) + ux*ux*(1.-np.cos(theta)), \
                      ux*uy*(1.-np.cos(theta))-uz*np.sin(theta), \
                      ux*uz*(1.-np.cos(theta))+uy*np.sin(theta)],\
@@ -294,9 +288,6 @@ def get_rot_matrix_arbitrary_axis(ux, uy, uz, theta):
 
 def rotate_around_vector(data, origin_point, rot_axis, angle, interp_order=3):
     dims = data.shape
-
-    print 'origin_point = %s' % str(origin_point)
-    print 'rot_vector = %s' % str(rot_axis)
 
     R = get_rot_matrix_arbitrary_axis(rot_axis[0], rot_axis[1], rot_axis[2], angle)
 
@@ -691,15 +682,21 @@ if __name__ == "__main__":
     #test_points_rotation2()
     #test_points_rotation3()
     #test_fish_alignemnt()
-    get_centroid_at_slice()
+    #get_centroid_at_slice()
 
     #align_eyes_centroids()
     #flip_horizontally()
     #check_depth_orientation()
     #check_vertical_orientation()
 
-    filepath = os.path.join(TMP_PATH, "fish243_aligned-eyes_aligned-eyes-flipped_-vertically-flipped_32bit_320x320x996.raw")
-    aligned_data = align_tail_part(filepath)
-    aligned_data.astype(np.float32).tofile(os.path.join(TMP_PATH, create_filename_with_shape(filepath, aligned_data.shape, prefix='TOTALPREVENTLEAKING')))
+    #filepath = os.path.join(TMP_PATH, "fish243_aligned-eyes_aligned-eyes-flipped_-vertically-flipped_32bit_320x320x996.raw")
+    #aligned_data = align_tail_part(filepath)
+    #aligned_data.astype(np.float32).tofile(os.path.join(TMP_PATH, create_filename_with_shape(filepath, aligned_data.shape, prefix='TOTALPREVENTLEAKING')))
 
     #rotation_test()
+    filepath = "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish200\\fish200_rotated_32bit_286x286x1235.raw"
+    #filepath = "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish204\\fish204_32bit_315x315x996.raw"
+    #filepath = "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish243\\fish243_32bit_320x320x996.raw"
+    data = open_data(filepath)
+    aligned_data = align_fish_by_eyes_tail(data)
+    aligned_data.astype(np.float32).tofile(os.path.join(TMP_PATH, create_filename_with_shape(filepath, aligned_data.shape, prefix='aligned')))
