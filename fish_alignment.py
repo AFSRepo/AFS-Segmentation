@@ -2,6 +2,8 @@ import os
 import numpy as np
 import pandas as pd
 import pickle
+import profile
+import pstats
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from scipy.ndimage import map_coordinates
@@ -694,9 +696,18 @@ if __name__ == "__main__":
     #aligned_data.astype(np.float32).tofile(os.path.join(TMP_PATH, create_filename_with_shape(filepath, aligned_data.shape, prefix='TOTALPREVENTLEAKING')))
 
     #rotation_test()
-    filepath = "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish200\\fish200_rotated_32bit_286x286x1235.raw"
+    #filepath = "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish200\\fish200_rotated_32bit_286x286x1235.raw"
     #filepath = "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish204\\fish204_32bit_315x315x996.raw"
     #filepath = "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish243\\fish243_32bit_320x320x996.raw"
+    filepath = "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish215\\fish215_32bit_640x640x2478.raw"
+    #filepath = "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish215\\fish215_32bit_320x320x1239.raw"
     data = open_data(filepath)
     aligned_data = align_fish_by_eyes_tail(data)
+    # statspath = os.path.join(TMP_PATH, "fish200.stats")
+    # profile.run('aligned_data = align_fish_by_eyes_tail(data)', statspath)
+    # stats = pstats.Stats(statspath)
+    # stats.strip_dirs()
+    # stats.sort_stats('percall')
+    # stats.print_stats()
+
     aligned_data.astype(np.float32).tofile(os.path.join(TMP_PATH, create_filename_with_shape(filepath, aligned_data.shape, prefix='aligned')))

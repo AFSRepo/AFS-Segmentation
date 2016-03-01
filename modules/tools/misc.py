@@ -1,5 +1,6 @@
-import time
+import timeit
 import numpy as np
+import wmi
 
 class BBox(object):
     def __init__(self, *args, **kwargs):
@@ -47,7 +48,7 @@ class BBox(object):
     def _force_evenness(self, value):
         return (value - 1) if value % 2 != 0 else value
 
-    def create_tuple(self, offset=0, max_ranges=None):
+    def create_tuple(self, offset=0, max_ranges=None, force_positiveness=True):
         z_start, z_end = None, None
         y_start, y_end = None, None
         x_start, x_end = None, None
@@ -67,14 +68,21 @@ class BBox(object):
                                   x_max if (self.x + self.width + offset) > x_max else \
                                             (self.x + self.width + offset)
         else:
-            z_start, z_end = self.z if (self.z - offset) < 0 else (self.z - offset), \
-                              self.z + self.depth + offset
-            y_start, y_end = self.y if (self.y - offset) < 0 else (self.y - offset), \
-                              self.y + self.height + offset
+            if force_positiveness:
+                z_start, z_end = self.z if (self.z - offset) < 0 else (self.z - offset), \
+                                  self.z + self.depth + offset
+                y_start, y_end = self.y if (self.y - offset) < 0 else (self.y - offset), \
+                                  self.y + self.height + offset
 
-            if not self.is2DBox:
-                x_start, x_end = self.x if (self.x - offset) < 0 else (self.x - offset), \
-                                  self.x + self.width + offset
+                if not self.is2DBox:
+                    x_start, x_end = self.x if (self.x - offset) < 0 else (self.x - offset), \
+                                      self.x + self.width + offset
+            else:
+                z_start, z_end = self.z - offset, self.z + self.depth + offset
+                y_start, y_end = self.y - offset, self.y + self.height + offset
+
+                if not self.is2DBox:
+                    x_start, x_end = self.x - offset, self.x + self.width + offset
 
         z_start, z_end = self._force_evenness(z_start), self._force_evenness(z_end)
         y_start, y_end = self._force_evenness(y_start), self._force_evenness(y_end)
@@ -95,20 +103,29 @@ class BBox(object):
 
 class Timer(object):
     def __init__(self):
-        self.start = time.time()
+        self.start = timeit.default_timer()
 
     def elapsed(self, title):
-        self.stop = time.time()
-        print "Elapsed time (%s):%f sec" % (title, self.stop - self.start)
+        self.stop = timeit.default_timer()
+        diff = self.stop - self.start
+        print "Elapsed time (%s): %f sec ~= %f min" % (title, diff, diff / 60.)
 
 #http://stackoverflow.com/questions/5478351/python-time-measure-function
 def timing(f):
-    def wrap(*args):
+    def wrap(*args, **kwargs):
         print '%s has started execution.' % f.func_name
-        time1 = time.time()
-        ret = f(*args)
-        time2 = time.time()
+        time1 = timeit.default_timer()
+        ret = f(*args, **kwargs)
+        time2 = timeit.default_timer()
         residual = time2 - time1
         print '%s function took %0.3f ms ~= %0.2f sec ~= %0.2f min.' % (f.func_name, residual * 1000., residual, residual / 60.)
         return ret
     return wrap
+
+def print_available_ram():
+    pc = wmi.WMI()
+    total, available = float(pc.Win32_ComputerSystem()[0].TotalPhysicalMemory) / 1024. / 1024., float(pc.Win32_OperatingSystem()[0].FreePhysicalMemory) / 1024.
+
+    fraction = available/total
+
+    print "########## Avaliable RAM (%0.1f / %0.1f MB ~= %0.1f%%)" % (available, total, (fraction * 100.))
