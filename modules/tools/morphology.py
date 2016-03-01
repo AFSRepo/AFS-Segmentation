@@ -45,7 +45,7 @@ _MEASUREMENTS_VALS = _MEASUREMENTS.values()
 _MEASUREMENTS_EXTRA_VALS = _MEASUREMENTS_EXTRA.values()
 _MEASUREMENTS_EXTRA_VALS_2D = _MEASUREMENTS_EXTRA_2D.values()
 
-def gather_statistics(stack_data, is_inverse=True):
+def gather_statistics(stack_data, is_inverse=True, verbose=False):
     thresholded_stack = np.empty_like(stack_data, dtype=np.uint8)
 
     print 'Gathering statistics...'
@@ -56,8 +56,9 @@ def gather_statistics(stack_data, is_inverse=True):
                                        else stack_data[slice_idx] >= threshold_val
         thresholded_stack[slice_idx] = median_filter(thresholded_stack[slice_idx], size=(1,1))
 
-        if slice_idx % 100 == 0 or slice_idx == stack_data.shape[0]-1:
-            print 'Slice #%d' % slice_idx
+        if verbose:
+            if slice_idx % 100 == 0 or slice_idx == stack_data.shape[0]-1:
+                print 'Slice #%d' % slice_idx
 
     stack_statistics, _ = object_counter(thresholded_stack)
 
