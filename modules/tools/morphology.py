@@ -239,6 +239,9 @@ def cell_counter(slice_binary_data, min_area=0.0, min_circularity=0.0, slice_ind
     print 'Object counting - Labeling...'
     labeled_data, num_labels = label(slice_binary_data)
 
+    if not num_labels:
+        return pd.DataFrame(), np.zeros(slice_binary_data.shape)
+
     print 'Object counting - BBoxing...'
     bboxes_labels = [BBox(bb_obj) for bb_obj in find_objects(labeled_data)]
 
