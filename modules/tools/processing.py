@@ -1,4 +1,5 @@
 import os
+import gc
 import numpy as np
 import pandas as pd
 from operator import attrgetter
@@ -221,8 +222,11 @@ def rotate_around_vector(data, origin_point, rot_axis, angle, interp_order=3):
 
     #get the values for your new coordinates
     print 'Rotation around vector - Interpolation in 3D...'
-    interp_data = interp3(np.arange(dims[0], dtype=np.uint32), np.arange(dims[1], dtype=np.uint32), np.arange(dims[2], dtype=np.uint32), data, \
-                          z_coordinates, y_coordinates, x_coordinates, order=interp_order)
+    x, y, z = np.arange(dims[0], dtype=np.int32), np.arange(dims[1], dtype=np.int32), np.arange(dims[2], dtype=np.int32)
+    interp_data = interp3(x, y, z, data, z_coordinates, y_coordinates, x_coordinates, order=interp_order)
+
+    print_available_ram()
+    del data, x, y, z, x_coordinates, y_coordinates, z_coordinates
     print_available_ram()
 
     return interp_data, R, origin_point
@@ -311,7 +315,7 @@ def _calc_approx_eyes_params(data_shape):
     if sum(data_shape) > 2800:
         min_area = 20000
     elif sum(data_shape) < 2100:
-        min_area = 8000
+        min_area = 4000
     else:
         min_area = 12000
 
@@ -321,30 +325,33 @@ def check_depth_orientation(data, is_tail_fisrt=True):
     print_available_ram()
 
     print 'Depth orientation correction - Finding eyes...'
-    stack_statistics, threshoded_data = gather_statistics(data)
+    stack_statistics, thresholded_data = gather_statistics(data)
     min_area, min_sphericity = _calc_approx_eyes_params(data.shape)
     eyes_stats = eyes_statistics(stack_statistics, min_area=min_area, min_sphericity=min_sphericity)
 
     print_available_ram()
 
     print 'Depth orientation correction - Reversing data and stats z-direction if needed...'
-    data, flipped = _flip_z(data, eyes_stats, is_tail_fisrt=is_tail_fisrt)
+    flipped_data, flipped = _flip_z(data, eyes_stats, is_tail_fisrt=is_tail_fisrt)
+
+    del thresholded_data, data
 
     print_available_ram()
 
     if flipped:
-        eyes_stats = flip_stats(eyes_stats, data.shape, axes=(0,))
+        eyes_stats = flip_stats(eyes_stats, flipped_data.shape, axes=(0,))
 
     print_available_ram()
 
-    return data, eyes_stats, threshoded_data
+    return flipped_data, eyes_stats
 
 def check_vertical_orientation(data, eyes_stats=None):
     if eyes_stats is None:
         print 'Vectical orientation correction - Finding eyes...'
-        stack_statistics, _ = gather_statistics(data)
+        stack_statistics, thresholded_data = gather_statistics(data)
         min_area, min_sphericity = _calc_approx_eyes_params(data.shape)
         eyes_stats = eyes_statistics(stack_statistics, min_area=min_area, min_sphericity=min_sphericity)
+        del thresholded_data
 
     eye_c = np.round([eyes_stats['com_x'].mean(), eyes_stats['com_y'].mean(), eyes_stats['com_z'].mean()]).astype(np.int32)
     avg_eye_size = np.round(np.mean([eyes_stats['bb_width'].mean(), eyes_stats['bb_height'].mean(), eyes_stats['bb_depth'].mean()]))
@@ -354,12 +361,14 @@ def check_vertical_orientation(data, eyes_stats=None):
     head_slice_idx = eye_c[2] - z_shift
 
     print 'Vectical orientation correction - Analyzing head region slice #%d...' % head_slice_idx
-    data, flipped = _flip_y(data, head_slice_idx)
+    flipped_data, flipped = _flip_y(data, head_slice_idx)
+
+    del data
 
     if flipped:
-        eyes_stats = flip_stats(eyes_stats, data.shape, axes=(1,))
+        eyes_stats = flip_stats(eyes_stats, flipped_data.shape, axes=(1,))
 
-    return data, eyes_stats
+    return flipped_data, eyes_stats
 
 def _align_by_eyes_centroids(data, centroids, interp_order=3):
     dims = data.shape
@@ -369,11 +378,17 @@ def _align_by_eyes_centroids(data, centroids, interp_order=3):
     p = np.array([eye_l, eye_r])
     p_s = p - eye_c
 
-    theta = np.arccos(p_s[0][0]/np.sqrt(p_s[0].dot(p_s[0])))
+    #theta = np.arccos(p_s[0][0]/np.sqrt(p_s[0].dot(p_s[0])))
+    x_axis_vec = np.array([float(np.sign(p_s[0][0])),0.,0.])
+    theta = np.arccos(p_s[0].dot(x_axis_vec)/np.sqrt(x_axis_vec.dot(x_axis_vec) * p_s[0].dot(p_s[0])))
 
-    x_axis_vec = np.array([1.,0.,0.])
     rot_axis = np.cross(p_s[0], x_axis_vec)
     rot_axis = rot_axis / np.linalg.norm(rot_axis)
+
+    print 'theta eyes = %f' % np.rad2deg(theta)
+    print 'rot_axis eyes = %s' % str(rot_axis)
+    print 'x_axis_vec eyes = %s' % str(x_axis_vec)
+    print 'vec eyes = %s' % str(p_s[0])
 
     interp_data, R, origin_point = rotate_around_vector(data, eye_c, rot_axis, -theta, interp_order=interp_order)
 
@@ -384,9 +399,10 @@ def align_eyes_centroids(data, eyes_stats=None):
 
     if eyes_stats is None:
         print 'Aligning of eyes\' centroids - Finding eyes...'
-        stack_statistics, _ = gather_statistics(data)
+        stack_statistics, thresholded_data = gather_statistics(data)
         min_area, min_sphericity = _calc_approx_eyes_params(data.shape)
         eyes_stats = eyes_statistics(stack_statistics, min_area=min_area, min_sphericity=min_sphericity)
+        del thresholded_data
 
     print_available_ram()
 
@@ -406,27 +422,34 @@ def align_eyes_centroids(data, eyes_stats=None):
     print 'Aligning of eyes\' centroids - Aligning along x- and y-axes...'
     aligned_data, R, origin_point  = _align_by_eyes_centroids(data, eyes_coms)
 
+    del data
+
     print_available_ram()
 
     aligned_eyes_stats = rotate_stats(eyes_stats, R, origin_point)
+
+    del R
 
     print_available_ram()
 
     return aligned_data, aligned_eyes_stats
 
-def align_tail_part(input_data, landmark_tail_idx_frac=0.56383, spinal_angle=0.12347, interp_order=3):
+def align_tail_part(input_data, landmark_tail_idx_frac=0.56383, spinal_angle=0.12347, interp_order=3, bb_side_offset=20):
     print 'Aligning of tail part - Extracting z-bounded data...'
     binarized_stack, bbox, eyes_stats = binarizator(input_data)
-    binary_stack_stats, _ = object_counter(binarized_stack)
+    binary_stack_stats, thresholded_data = object_counter(binarized_stack)
     largest_volume_region, _ = \
-                    extract_largest_area_data(input_data, binary_stack_stats, bb_side_offset=50, \
+                    extract_largest_area_data(input_data, binary_stack_stats, bb_side_offset=bb_side_offset, \
                                               force_bbox_fit=False, pad_data=True, extact_axes=(0,), \
                                               force_positiveness=False)
+    del thresholded_data, binarized_stack
 
     print 'Aligning of tail part - Finding eyes...'
-    stack_statistics, _ = gather_statistics(largest_volume_region)
+    stack_statistics, inversed_thresholded_data = gather_statistics(largest_volume_region)
     min_area, min_sphericity = _calc_approx_eyes_params(input_data.shape)
     eyes_stats = eyes_statistics(stack_statistics, min_area=min_area, min_sphericity=min_sphericity)
+
+    del inversed_thresholded_data
 
     print 'Aligning of tail part - Calculating eyes\' center, landmark point...'
     eye_c = np.round([eyes_stats['com_x'].mean(), eyes_stats['com_y'].mean(), eyes_stats['com_z'].mean()]).astype(np.int32)
@@ -435,18 +458,25 @@ def align_tail_part(input_data, landmark_tail_idx_frac=0.56383, spinal_angle=0.1
     eye1_idx_frac, eye2_idx_frac = eyes_stats['com_z'].values[0] / float(ext_vol_len),\
                                    eyes_stats['com_z'].values[1] / float(ext_vol_len)
 
+    #Approx. position of landmark on the tail part
     landmark_tail_idx = int(ext_vol_len * landmark_tail_idx_frac)
     lm_slice_stats, lm_labeled_slice = stats_at_slice(largest_volume_region, landmark_tail_idx)
 
+    #z-axis
     z_axis_vec = np.array([0., 0., -1.])
+
+    #vector from eyes center along tail to the landmark point
     tail_com_y, tail_com_z = lm_slice_stats['com_z'].values[0] - eye_c[1], landmark_tail_idx - eye_c[2]
     spinal_vec = np.array([0, tail_com_y, tail_com_z])
 
+    #cross product of z-axis and the vector to produce orthogonal vector of rotation
     rot_axis = np.cross(z_axis_vec, spinal_vec)
     rot_axis = rot_axis / np.linalg.norm(rot_axis)
 
+    #angle between the vector and z-axis
     theta = np.arccos(z_axis_vec.dot(spinal_vec)/(np.sqrt(z_axis_vec.dot(z_axis_vec)) * np.sqrt(spinal_vec.dot(spinal_vec))))
 
+    #calculate an angle value to aling the vector with the reference vector of spinal_angle rad with z-axis
     if tail_com_y < 0:
         theta = (theta - spinal_angle) if theta > spinal_angle else -(spinal_angle - theta)
     else:
@@ -455,12 +485,15 @@ def align_tail_part(input_data, landmark_tail_idx_frac=0.56383, spinal_angle=0.1
     print 'Aligning of tail part - Rotating data around %s vector by %f degree...' % (str(rot_axis), np.rad2deg(-theta))
     data_rotated, _, _ = rotate_around_vector(largest_volume_region, eye_c, rot_axis, theta, interp_order=interp_order)
 
+    del largest_volume_region
+
     print 'Aligning of tail part - Extracting aligned data...'
     data_rotated_binarized_stack, _, _ = binarizator(data_rotated)
-    data_rotated_binary_stack_stats, _ = object_counter(data_rotated_binarized_stack)
+    data_rotated_binary_stack_stats, thresholded_stack = object_counter(data_rotated_binarized_stack)
     largest_data_rotated_region, _ = extract_largest_area_data(data_rotated, data_rotated_binary_stack_stats, \
-                                                               bb_side_offset=50, force_bbox_fit=False, pad_data=True, \
+                                                               bb_side_offset=bb_side_offset, force_bbox_fit=False, pad_data=True, \
                                                                force_positiveness=False)
+    del data_rotated, thresholded_stack, data_rotated_binarized_stack
 
     return largest_data_rotated_region
 
@@ -470,9 +503,12 @@ TMP_PATH = "C:\\Users\\Administrator\\Documents\\tmp"
 #filled_y_data.astype(np.float32).tofile(os.path.join(TMP_PATH, create_filename_with_shape(filepath, filled_y_data.shape, prefix='stage3')))
 #aligned_data.astype(np.float32).tofile(os.path.join(TMP_PATH, create_filename_with_shape(filepath, aligned_data.shape, prefix='stage2')))
 #tail_aligned_data.astype(np.float32).tofile(os.path.join(TMP_PATH, create_filename_with_shape(filepath, tail_aligned_data.shape, prefix='stage4')))
-filepath = "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish215\\fish215_32bit_640x640x2478.raw"
+filepath = "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish204\\fish204_32bit_631x631x1992.raw"
+#filepath = "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish204\\fish204_32bit_315x315x996.raw"
+#filepath = "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish243\\fish243_32bit_320x320x996.raw"
 #filepath = "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish215\\fish215_32bit_320x320x1239.raw"
-from .io import open_data, create_filename_with_shape
+#filepath = "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish200\\fish200_rotated_32bit_286x286x1235.raw"
+from .io import open_data, create_filename_with_shape, get_filename
 from .misc import print_available_ram
 import matplotlib.pyplot as plt
 
@@ -485,7 +521,7 @@ def align_fish_by_eyes_tail___old(input_data, landmark_tail_idx_frac=0.56383, sp
         flipped_z_data = open_data(curpath_data)
         flipped_z_eyes_stats = pd.read_csv(curpath_stats)
     else:
-        flipped_z_data, flipped_z_eyes_stats, threshoded_data = check_depth_orientation(input_data)
+        flipped_z_data, flipped_z_eyes_stats = check_depth_orientation(input_data)
         flipped_z_data.astype(np.float32).tofile(curpath_data)
         flipped_z_eyes_stats.to_csv(curpath_stats)
 
@@ -512,38 +548,50 @@ def align_fish_by_eyes_tail___old(input_data, landmark_tail_idx_frac=0.56383, sp
         flipped_y_data.astype(np.float32).tofile(curpath_data)
         flipped_y_eyes_stats.to_csv(curpath_stats)
 
+    del aligned_data, aligned_eyes_stats
+
     tail_aligned_data = align_tail_part(flipped_y_data,
                                         landmark_tail_idx_frac=landmark_tail_idx_frac, \
                                         spinal_angle=spinal_angle,
                                         interp_order=interp_order)
 
+    del flipped_y_data, flipped_y_eyes_stats
+
     return tail_aligned_data
 
 @timing
-def align_fish_by_eyes_tail(input_data, landmark_tail_idx_frac=0.56383, spinal_angle=0.12347, interp_order=3):
+def align_fish_by_eyes_tail___(input_data, landmark_tail_idx_frac=0.56383, spinal_angle=0.12347, interp_order=3):
+    shape = tuple([1992,631,631])
+    #shape = tuple([996,315,315])
+    #shape = tuple([996,320,320])
+    #shape = tuple([1239,320,320])
+    #shape = tuple([1235,286,286])
+
+    fn = get_filename(filepath)
+
     flipped_z_data, flipped_z_eyes_stats = None, None
-    curpath_data = os.path.join(TMP_PATH, create_filename_with_shape(filepath, tuple([2478,640,640]), prefix='flippedzdata'))
-    curpath_stats = os.path.join(TMP_PATH, "flipped_z_eyes_stats_fish215_32bit_640x640x2478.csv")
+    curpath_data = os.path.join(TMP_PATH, create_filename_with_shape(filepath, shape, prefix='flippedzdata'))
+    curpath_stats = os.path.join(TMP_PATH, "flipped_z_eyes_stats_%s.csv" % fn)
     if os.path.exists(curpath_data) and os.path.exists(curpath_stats):
         flipped_z_data = open_data(curpath_data)
         print "flipped_z_data = %s" % str(flipped_z_data.shape)
-        plt.imshow(flipped_z_data[1500], cmap='gray')
+        plt.imshow(flipped_z_data[400], cmap='gray')
         plt.show()
         flipped_z_eyes_stats = pd.read_csv(curpath_stats)
         print flipped_z_eyes_stats
     else:
-        flipped_z_data, flipped_z_eyes_stats, threshoded_data = check_depth_orientation(input_data)
+        flipped_z_data, flipped_z_eyes_stats = check_depth_orientation(input_data)
         flipped_z_data.astype(np.float32).tofile(curpath_data)
         flipped_z_eyes_stats.to_csv(curpath_stats)
 
 
     aligned_data, aligned_eyes_stats = None, None
-    curpath_data = os.path.join(TMP_PATH, create_filename_with_shape(filepath, tuple([2478,640,640]), prefix='aligneddata'))
-    curpath_stats = os.path.join(TMP_PATH, "aligned_eyes_stats_fish215_32bit_640x640x2478.csv")
+    curpath_data = os.path.join(TMP_PATH, create_filename_with_shape(filepath, shape, prefix='aligneddata'))
+    curpath_stats = os.path.join(TMP_PATH, "aligned_eyes_stats_%s.csv" % fn)
     if os.path.exists(curpath_data) and os.path.exists(curpath_stats):
         aligned_data = open_data(curpath_data)
         print "aligned_data = %s" % str(aligned_data.shape)
-        plt.imshow(aligned_data[1500], cmap='gray')
+        plt.imshow(aligned_data[400], cmap='gray')
         plt.show()
         aligned_eyes_stats = pd.read_csv(curpath_stats)
         print aligned_eyes_stats
@@ -552,13 +600,15 @@ def align_fish_by_eyes_tail(input_data, landmark_tail_idx_frac=0.56383, spinal_a
         aligned_data.astype(np.float32).tofile(curpath_data)
         aligned_eyes_stats.to_csv(curpath_stats)
 
+    del flipped_z_data, flipped_z_eyes_stats
+
     flipped_y_data, flipped_y_eyes_stats = None, None
-    curpath_data = os.path.join(TMP_PATH, create_filename_with_shape(filepath, tuple([2478,640,640]), prefix='flippedydata'))
-    curpath_stats = os.path.join(TMP_PATH, "flipped_y_eyes_stats_fish215_32bit_640x640x2478.csv")
+    curpath_data = os.path.join(TMP_PATH, create_filename_with_shape(filepath, shape, prefix='flippedydata'))
+    curpath_stats = os.path.join(TMP_PATH, "flipped_y_eyes_stats_%s.csv" % fn)
     if os.path.exists(curpath_data) and os.path.exists(curpath_stats):
         flipped_y_data = open_data(curpath_data)
         print "flipped_y_data = %s" % str(flipped_y_data.shape)
-        plt.imshow(flipped_y_data[1500], cmap='gray')
+        plt.imshow(flipped_y_data[400], cmap='gray')
         plt.show()
         flipped_y_eyes_stats = pd.read_csv(curpath_stats)
         print flipped_y_eyes_stats
@@ -571,5 +621,26 @@ def align_fish_by_eyes_tail(input_data, landmark_tail_idx_frac=0.56383, spinal_a
                                         landmark_tail_idx_frac=landmark_tail_idx_frac, \
                                         spinal_angle=spinal_angle,
                                         interp_order=interp_order)
+
+    return tail_aligned_data
+
+@timing
+def align_fish_by_eyes_tail(input_data, landmark_tail_idx_frac=0.56383, spinal_angle=0.12347, interp_order=3):
+    flipped_z_data, flipped_z_eyes_stats = check_depth_orientation(input_data)
+
+    aligned_data, aligned_eyes_stats = align_eyes_centroids(flipped_z_data, eyes_stats=flipped_z_eyes_stats)
+
+    del flipped_z_data, flipped_z_eyes_stats
+
+    flipped_y_data, flipped_y_eyes_stats = check_vertical_orientation(aligned_data, eyes_stats=aligned_eyes_stats)
+
+    del aligned_data, aligned_eyes_stats
+
+    tail_aligned_data = align_tail_part(flipped_y_data,
+                                        landmark_tail_idx_frac=landmark_tail_idx_frac, \
+                                        spinal_angle=spinal_angle,
+                                        interp_order=interp_order)
+
+    del flipped_y_data, flipped_y_eyes_stats
 
     return tail_aligned_data
