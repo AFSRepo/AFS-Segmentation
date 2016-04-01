@@ -85,3 +85,14 @@ def check_files(working_dir, key_word):
             return True
 
     return False
+
+def get_path_by_name(fish_number, input_dir):
+    for fname in os.listdir(input_dir):
+        path = os.path.join(input_dir, fname)
+        if os.path.isfile(path):
+            if str(fish_number) in path:
+                return path
+            else:
+                continue
+
+    return None

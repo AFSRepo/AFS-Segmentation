@@ -3,7 +3,7 @@ import os
 import numpy as np
 from modules.tools.env import DataEnvironment
 from multiprocessing import Process, Pool
-from modules.tools.io import create_raw_stack, open_data, create_filename_with_shape, parse_filename
+from modules.tools.io import create_raw_stack, open_data, create_filename_with_shape, parse_filename, get_path_by_name
 from modules.tools.processing import binarizator, align_fish_by_eyes_tail
 from modules.tools.misc import Timer
 from modules.tools.morphology import object_counter, gather_statistics, extract_largest_area_data
@@ -16,17 +16,18 @@ from scipy.ndimage.measurements import label, find_objects
 from scipy.ndimage.interpolation import zoom, rotate
 import pandas as pd
 import pdb
-#import subproces
 import shutil
 
-base_save_path = "C:\\Users\\Administrator\\Documents\\afs_test_out\\%s"
+INPUT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir, 'MedakaRawData'))
+OUTPUT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir, 'AFS-Segmentation'))
+LSDF_DIR = '/mnt/lsdf' if os.name == 'posix' else "Z:\\"
 
 def convert_fish(fish_number):
     print '----Converting fish #%d' % fish_number
-    dir_path = "/mnt/lsdf/grif/ANKA_data/2014/XRegioMay2014/tomography/Phenotyping/Recon/fish%d/Complete/Corr" % fish_number
-    out_path = "/mnt/lsdf/grif/Phenotype_medaka/Originals/%s"
-    #dir_path = "Z:\\grif\\ANKA_data\\2014\\XRegioMay2014\\tomography\\Phenotyping\\Recon\\fish%d\\Complete\\Corr" % fish_number
-    #out_path = "Z:\\grif\\Phenotype_medaka\\Originals\\%s"
+    dir_path = os.path.join(LSDF_DIR, 'grif', 'ANKA_data', '2014', 'XRegioMay2014', 'tomography', 'Phenotyping', 'Recon', 'fish%d', 'Complete', 'Corr')
+    dir_path = dir_path % fish_number
+    out_path = os.path.join(LSDF_DIR, 'grif', 'Phenotype_medaka', 'Originals', '%s')
+
     raw_data_stack = create_raw_stack(dir_path, "fish%d_proj_" % fish_number)
 
     print '----Raw stack creating fish #%d' % fish_number
@@ -41,19 +42,6 @@ def convert_fish_in_parallel(fish_num_array, core=4):
     p.map(convert_fish, fish_num_array)
 
     t.elapsed('Fish converting')
-
-
-def get_path_by_name(fish_number, input_dir):
-    for fname in os.listdir(input_dir):
-        path = os.path.join(input_dir, fname)
-        if os.path.isfile(path):
-            if str(fish_number) in path:
-                return path
-            else:
-                continue
-
-    return None
-
 
 def zoom_chunk_fishes(args):
     for arg in args:
@@ -126,40 +114,6 @@ def zoom_fishes(fish_num_array, input_dir, output_dir):
 
         t.elapsed('Zooming')
 
-def rotate_data_fish202():
-    output_path = "C:\\Users\\Administrator\\Documents\\AFS_results\\fish%d"
-
-    input_path = "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish202\\fish202_32bit_640x640x1996.raw"
-    fish_data = np.memmap(input_path, dtype=np.float32, shape=(1996, 640, 640))
-
-    t = Timer()
-    a_z = -114.0
-    a_y = -2.0
-    rotated_data = rotate(fish_data, a_z, axes=(2, 1), order=3, reshape=False)
-    rotated_data = rotate(rotated_data, a_y, axes=(0, 2), order=3, reshape=False)
-    t.elapsed('Rotation')
-
-    rotated_data.tofile((output_path % 202) + '\\fish202_rotated_order3_32bit_640x640x1996.raw')
-
-def rotate_data_fish200():
-    output_path = "/home/rshkarin/ANKA_work/AFS-playground/ProcessedMedaka/fish%d"
-
-    input_path = "/home/rshkarin/ANKA_work/AFS-playground/ProcessedMedaka/fish200/fish200_rotated_32bit_573x573x2470.raw"
-    fish_data = open_data(input_path)
-
-    t = Timer()
-    a_z = 6.0
-    a_y = -2.0
-    rotated_data = rotate(fish_data, a_z, axes=(2, 1), order=3, reshape=False)
-    rotated_data = rotate(rotated_data, a_y, axes=(0, 2), order=3, reshape=False)
-    t.elapsed('Rotation')
-
-    rotated_data.tofile(os.path.join((output_path % 200), 'fish200_rotated_aligned_order3_32bit_573x573x2470.raw'))
-
-
-#FIX!!!!!!!
-
-#FIX!!!!!!!
 def zoom_rotate(input_path, output_path, rotate_angle=0, rot_axis='z', in_folder=False):
     t = Timer()
 
@@ -197,123 +151,6 @@ def zoom_rotate(input_path, output_path, rotate_angle=0, rot_axis='z', in_folder
     rotated_data.tofile(output_path)
 
     t.elapsed('Zoom and rotation: %s' % input_path)
-
-def inverse_rotate_zoom_data_fish202():
-    output_path = "C:\\Users\\Administrator\\Documents\\AFS_results\\fish%d"
-    input_path = "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish202\\fish202_labels_8bit_640x640x1996.raw"
-    fish_data = np.memmap(input_path, dtype=np.uint8, shape=(1996, 640, 640))
-
-    t = Timer()
-    a_y = 2.0
-    a_z = 114.0
-    rotated_data = rotate(fish_data, a_y, axes=(0, 2), order=0, reshape=False)
-    rotated_data = rotate(rotated_data, a_z, axes=(2, 1), order=0, reshape=False)
-    t.elapsed('Inverse Rotation')
-
-    rotated_data.tofile((output_path % 202) + '\\fish202_inverse_rotated_labels_8bit_640x640x1996.raw')
-
-    t = Timer()
-    zoomed_data = zoom(rotated_data, 2.0, order=0)
-    t.elapsed('Scaling')
-
-    output_zoom = ((output_path % 202) + "\\fish202_scaled_rotated_label_8bit_%dx%dx%d.raw") % (zoomed_data.shape[2], zoomed_data.shape[1], zoomed_data.shape[0])
-    zoomed_data.tofile(output_zoom)
-
-def convert_data():
-    convert_fish(209)
-    convert_fish(214)
-    convert_fish(215)
-    convert_fish(221)
-    convert_fish(223)
-    convert_fish(224)
-    convert_fish(226)
-    convert_fish(228)
-    convert_fish(230)
-    convert_fish(231)
-    convert_fish(233)
-    convert_fish(235)
-    convert_fish(236)
-    convert_fish(237)
-    convert_fish(238)
-    convert_fish(239)
-    convert_fish(243)
-    convert_fish(244)
-    convert_fish(245)
-
-def split_body_test():
-    input_path = "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish202\\fish202_labels_8bit_640x640x1996.raw"
-    fish_data_labels = np.memmap(input_path, dtype=np.uint8, shape=(1996, 640, 640))
-
-    split_fish(fish_data_labels)
-
-def align_fish_test():
-    align_fish("","")
-
-def run_segmentation():
-    target_project_path = "C:\\Users\\Administrator\\Documents\\AFS-Segmentation\\fish202"
-    target_input_path = "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish202\\fish202_aligned_32bit_640x640x1996.raw"
-    target_input_labels_path = "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish202\\fish202_aligned_labels_8bit_640x640x1996.raw"
-    target_input_spine_labels_path = "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish202\\fish202_aligned_spine_labels_8bit_640x640x1996.raw"
-
-    moving_project_path = "C:\\Users\\Administrator\\Documents\\AFS-Segmentation\\fish204"
-    moving_input_path = "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish204\\fish204_rotated_32bit_631x631x1992.raw"
-
-    fixed_data_env = DataEnvironment(target_project_path, target_input_path)
-    moving_data_env = DataEnvironment(moving_project_path, moving_input_path)
-
-    fixed_data_env.set_input_labels_path(target_input_labels_path)
-    fixed_data_env.set_input_spine_labels_path(target_input_spine_labels_path)
-    fixed_data_env.set_target_data_path(moving_input_path)
-
-    moving_data_env.set_target_data_path(target_input_path)
-
-    crop_align_data(fixed_data_env, moving_data_env)
-
-def run_brain_segmentation():
-    target_project_path = "C:\\Users\\Administrator\\Documents\\AFS-Segmentation\\fish202"
-    target_input_path = "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish202\\fish202_aligned_32bit_640x640x1996.raw"
-    target_input_labels_path = "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish202\\fish202_aligned_labels_8bit_640x640x1996.raw"
-    target_input_spine_labels_path = "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish202\\fish202_aligned_spine_labels_8bit_640x640x1996.raw"
-
-    # moving_project_paths = ["C:\\Users\\Administrator\\Documents\\AFS-Segmentation\\fish204",\
-    #                         "C:\\Users\\Administrator\\Documents\\AFS-Segmentation\\fish200",\
-    #                         "C:\\Users\\Administrator\\Documents\\AFS-Segmentation\\fish215"]
-    # moving_input_paths = ["C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish204\\fish204_rotated_32bit_631x631x1992.raw",\
-    #                       "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish200\\fish200_rotated_32bit_573x573x2470.raw",\
-    #                       "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish215\\fish215_32bit_640x640x2478.raw"]
-    # fish_num = ["204", "200", "215"]
-
-    # moving_project_paths = ["C:\\Users\\Administrator\\Documents\\AFS-Segmentation\\fish200",\
-    #                         "C:\\Users\\Administrator\\Documents\\AFS-Segmentation\\fish215"]
-    # moving_input_paths = ["C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish200\\fish200_rotated_32bit_573x573x2470.raw",\
-    #                       "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish215\\fish215_32bit_640x640x2478.raw"]
-    # fish_num = ["200", "215"]
-
-    moving_project_paths = ["C:\\Users\\Administrator\\Documents\\AFS-Segmentation\\fish204"]
-    moving_input_paths = ["C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish204\\fish204_rotated_32bit_631x631x1992.raw"]
-    fish_num = ["204"]
-
-    print 'PEW PEW PEW FIST LAUNCH OF AUTO-BRAIN SEGMENTATION!'
-
-    for proj_path, input_path, fn in zip(moving_project_paths, moving_input_paths, fish_num):
-        print '########################################## Fish %s ##########################################' % fn
-        moving_data_env = DataEnvironment(proj_path, input_path)
-        fixed_data_env = DataEnvironment(target_project_path, target_input_path)
-
-        fixed_data_env.set_input_labels_path(target_input_labels_path)
-        fixed_data_env.set_input_spine_labels_path(target_input_spine_labels_path)
-        fixed_data_env.set_target_data_path(input_path)
-
-        moving_data_env.set_target_data_path(target_input_path)
-
-        print 'Moving data project path: %s' % proj_path
-        print 'Moving data input path: %s' % proj_path
-
-        print 'Fixed data project path: %s' % target_project_path
-        print 'Fixed data input path: %s' % target_input_path
-        print 'Fixed data target data path: %s' % fixed_data_env.envs['target_data_path']
-
-        brain_segmentation(fixed_data_env, moving_data_env)
 
 class FishDataEnv:
     def __init__(self, target_project_path, target_input_path, \
@@ -361,64 +198,6 @@ def _build_fish_data_paths():
                             204))
     return data
 
-def run_brain_segmentation_unix():
-    # target_project_path = "/home/rshkarin/ANKA_work/AFS-playground/Segmentation/fish202"
-    # target_input_path = "/home/rshkarin/ANKA_work/AFS-playground/ProcessedMedaka/fish202/fish202_aligned_32bit_640x640x1996.raw"
-    # target_input_labels_path = "/home/rshkarin/ANKA_work/AFS-playground/ProcessedMedaka/fish202/fish202_aligned_labels_8bit_640x640x1996.raw"
-    # target_input_spine_labels_path = "/home/rshkarin/ANKA_work/AFS-playground/ProcessedMedaka/fish202/fish202_aligned_spine_labels_8bit_640x640x1996.raw"
-
-    # target_project_path = "/home/rshkarin/ANKA_work/AFS-playground/Segmentation/fish200"
-    # target_input_path = "/home/rshkarin/ANKA_work/AFS-playground/ProcessedMedaka/fish200/fish200_rotated_aligned_order3_32bit_573x573x2470.raw"
-    # target_input_labels_path = "/home/rshkarin/ANKA_work/AFS-playground/ProcessedMedaka/fish200/fish200_rotated_aligned_order3_labels_8bit_573x573x2470.raw"
-
-    # moving_project_paths = ["C:\\Users\\Administrator\\Documents\\AFS-Segmentation\\fish204",\
-    #                         "C:\\Users\\Administrator\\Documents\\AFS-Segmentation\\fish200",\
-    #                         "C:\\Users\\Administrator\\Documents\\AFS-Segmentation\\fish215"]
-    # moving_input_paths = ["C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish204\\fish204_rotated_32bit_631x631x1992.raw",\
-    #                       "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish200\\fish200_rotated_32bit_573x573x2470.raw",\
-    #                       "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish215\\fish215_32bit_640x640x2478.raw"]
-    # fish_num = ["204", "200", "215"]
-
-    # moving_project_paths = ["/home/rshkarin/ANKA_work/AFS-playground/Segmentation/fish200", \
-    #                        "/home/rshkarin/ANKA_work/AFS-playground/Segmentation/fish215"]
-    # moving_input_paths = ["fish200_rotated_32bit_573x573x2470.raw",\
-    #                       "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish215\\fish215_32bit_640x640x2478.raw"
-    # fish_num = ["215"]
-
-    # moving_project_paths = ["/home/rshkarin/ANKA_work/AFS-playground/Segmentation/fish200"]
-    # moving_input_paths = ["/home/rshkarin/ANKA_work/AFS-playground/ProcessedMedaka/fish200/fish200_rotated_32bit_573x573x2470.raw"]
-    # fish_num = ["200"]
-
-    # moving_project_paths = ["/home/rshkarin/ANKA_work/AFS-playground/Segmentation/fish215"]
-    # moving_input_paths = ["/home/rshkarin/ANKA_work/AFS-playground/ProcessedMedaka/fish215/fish215_rotated_r90_32bit_640x640x2478.raw"]
-    # fish_num = ["215"]
-
-    # moving_project_paths = ["/home/rshkarin/ANKA_work/AFS-playground/Segmentation/fish204"]
-    # moving_input_paths = ["/home/rshkarin/ANKA_work/AFS-playground/ProcessedMedaka/fish204/fish204_rotated_32bit_631x631x1992.raw"]
-    # fish_num = ["204"]
-
-    print 'PEW PEW PEW FIST LAUNCH OF AUTO-BRAIN SEGMENTATION!'
-
-    for proj_path, input_path, fn in zip(moving_project_paths, moving_input_paths, fish_num):
-        print '########################################## Fish %s ##########################################' % fn
-        moving_data_env = DataEnvironment(proj_path, input_path)
-        fixed_data_env = DataEnvironment(target_project_path, target_input_path)
-
-        fixed_data_env.set_input_labels_path(target_input_labels_path)
-        # fixed_data_env.set_input_spine_labels_path(target_input_spine_labels_path)
-        fixed_data_env.set_target_data_path(input_path)
-
-        moving_data_env.set_target_data_path(target_input_path)
-
-        print 'Moving data project path: %s' % proj_path
-        print 'Moving data input path: %s' % proj_path
-
-        print 'Fixed data project path: %s' % target_project_path
-        print 'Fixed data input path: %s' % target_input_path
-        print 'Fixed data target data path: %s' % fixed_data_env.envs['target_data_path']
-
-        brain_segmentation_nifty(fixed_data_env, moving_data_env)
-
 def clean_version_run_brain_segmentation_unix():
     fishes_envs = _build_fish_data_paths()
 
@@ -433,11 +212,11 @@ def clean_version_run_brain_segmentation_unix():
 def scaling_aligning():
     fish_num_array = np.array([200, 204, 215, 223, 226, 228, 230, 231, 233, 238, 243])
 
-    input_dir = "Z:\\grif\\Phenotype_medaka\\Misc\\Originals"
-    output_zoom_dir = "Z:\\grif\\Phenotype_medaka\\Misc\\Originals_scaled"
-    output_align_dir = "Z:\\grif\\Phenotype_medaka\\Misc\\Originals_aligned"
+    input_dir = os.path.join(LSDF_DIR, 'grif', 'Phenotype_medaka', 'Misc', 'Originals')
+    output_zoom_dir = os.path.join(LSDF_DIR, 'grif', 'Phenotype_medaka', 'Misc', 'Originals_scaled')
+    output_align_dir = os.path.join(LSDF_DIR, 'grif', 'Phenotype_medaka', 'Misc', 'Originals_aligned')
 
-    #zoom_fishes(fish_num_array, input_dir, output_zoom_dir)
+    zoom_fishes(fish_num_array, input_dir, output_zoom_dir)
 
     fish_num_array = np.array([230, 231, 233, 238, 243])
     align_fishes(fish_num_array, output_zoom_dir, output_align_dir)
