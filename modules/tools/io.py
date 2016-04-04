@@ -86,13 +86,17 @@ def check_files(working_dir, key_word):
 
     return False
 
-def get_path_by_name(fish_number, input_dir):
+def get_path_by_name(fish_number, input_dir, isFindLabels=False):
     for fname in os.listdir(input_dir):
         path = os.path.join(input_dir, fname)
         if os.path.isfile(path):
-            if str(fish_number) in path:
-                return path
+            if isFindLabels:
+                if all(v in path for v in [str(fish_number), 'label']):
+                    return path
             else:
-                continue
+                if str(fish_number) in path:
+                    return path
+        else:
+            continue
 
     return None

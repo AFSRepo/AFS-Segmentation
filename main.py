@@ -182,20 +182,23 @@ class FishDataEnv:
 
         return text
 
+def _build_fish_env(reference_fish_num, target_fish_num):
+    print os.path.join(OUTPUT_DIR, 'fish%d' % reference_fish_num)
+    print get_path_by_name(reference_fish_num, os.path.join(INPUT_DIR, 'fish%d' % reference_fish_num))
+    print get_path_by_name(reference_fish_num, os.path.join(INPUT_DIR, 'fish%d' % reference_fish_num), isFindLabels=True)
+    print os.path.join(OUTPUT_DIR, 'fish%d' % target_fish_num)
+    print get_path_by_name(target_fish_num, os.path.join(INPUT_DIR, 'fish%d' % target_fish_num))
+    print target_fish_num
+    return FishDataEnv(os.path.join(OUTPUT_DIR, 'fish%d' % reference_fish_num),\
+                       get_path_by_name(reference_fish_num, os.path.join(INPUT_DIR, 'fish%d' % reference_fish_num)),\
+                       get_path_by_name(reference_fish_num, os.path.join(INPUT_DIR, 'fish%d' % reference_fish_num), isFindLabels=True),\
+                       os.path.join(OUTPUT_DIR, 'fish%d' % target_fish_num),\
+                       get_path_by_name(reference_fish_num, os.path.join(INPUT_DIR, 'fish%d' % target_fish_num)),\
+                       target_fish_num)
+
 def _build_fish_data_paths():
     data = []
-    data.append(FishDataEnv("/home/rshkarin/ANKA_work/AFS-playground/Segmentation/fish200",\
-                            "/home/rshkarin/ANKA_work/AFS-playground/ProcessedMedaka/fish200/fish200_rotated_aligned_order3_32bit_573x573x2470.raw",\
-                            "/home/rshkarin/ANKA_work/AFS-playground/ProcessedMedaka/fish200/fish200_rotated_aligned_order3_labels_8bit_573x573x2470.raw",\
-                            "/home/rshkarin/ANKA_work/AFS-playground/Segmentation/fish215",\
-                            "/home/rshkarin/ANKA_work/AFS-playground/ProcessedMedaka/fish215/fish215_rotated_r90_32bit_640x640x2478.raw",\
-                            215))
-    data.append(FishDataEnv("/home/rshkarin/ANKA_work/AFS-playground/Segmentation/fish202",\
-                            "/home/rshkarin/ANKA_work/AFS-playground/ProcessedMedaka/fish202/fish202_aligned_32bit_640x640x1996.raw",\
-                            "/home/rshkarin/ANKA_work/AFS-playground/ProcessedMedaka/fish202/fish202_aligned_labels_8bit_640x640x1996.raw",\
-                            "/home/rshkarin/ANKA_work/AFS-playground/Segmentation/fish204",\
-                            "/home/rshkarin/ANKA_work/AFS-playground/ProcessedMedaka/fish204/fish204_rotated_32bit_631x631x1992.raw",\
-                            204))
+    data.append(*_build_fish_env(202, 204))
     return data
 
 def clean_version_run_brain_segmentation_unix():
@@ -224,4 +227,5 @@ def scaling_aligning():
 
 if __name__ == "__main__":
     #run_spine_segmentation("C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish204\\fish204_aligned_32bit_60x207x1220.raw")
-    clean_version_run_brain_segmentation_unix()
+    #clean_version_run_brain_segmentation_unix()
+    print _build_fish_env(202, 204)
