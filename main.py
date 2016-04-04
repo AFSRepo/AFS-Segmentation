@@ -20,7 +20,10 @@ import shutil
 
 INPUT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir, 'MedakaRawData'))
 OUTPUT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir, 'AFS-Segmentation'))
-LSDF_DIR = '/mnt/lsdf' if os.name == 'posix' else "Z:\\"
+LSDF_DIR = '/mnt/LSDF' if os.name == 'posix' else "Z:\\"
+
+#TODO:
+# 1. Sparate and pick up files by zoom level somehow.
 
 def convert_fish(fish_number):
     print '----Converting fish #%d' % fish_number
@@ -177,8 +180,8 @@ class FishDataEnv:
         text += 'Moving data project path: %s\n' % self.moving_project_path
         text += 'Moving data input path: %s\n' % self.moving_input_path
         text += 'Fixed data project path: %s\n' % self.target_project_path
-        text += 'Fixed data input path: %s' % self.target_input_path
-        text += 'Fixed data target data path: %s' % self.fixed_data_env.envs['target_data_path']
+        text += 'Fixed data input path: %s\n' % self.target_input_path
+        text += 'Fixed data target data path: %s\n' % self.fixed_data_env.envs['target_data_path']
 
         return text
 
@@ -193,13 +196,14 @@ def _build_fish_env(reference_fish_num, target_fish_num):
                        get_path_by_name(reference_fish_num, os.path.join(INPUT_DIR, 'fish%d' % reference_fish_num)),\
                        get_path_by_name(reference_fish_num, os.path.join(INPUT_DIR, 'fish%d' % reference_fish_num), isFindLabels=True),\
                        os.path.join(OUTPUT_DIR, 'fish%d' % target_fish_num),\
-                       get_path_by_name(reference_fish_num, os.path.join(INPUT_DIR, 'fish%d' % target_fish_num)),\
+                       get_path_by_name(target_fish_num, os.path.join(INPUT_DIR, 'fish%d' % target_fish_num)),\
                        target_fish_num)
 
 def _build_fish_data_paths():
     data = []
     data.append(*_build_fish_env(202, 204))
     return data
+
 
 def clean_version_run_brain_segmentation_unix():
     fishes_envs = _build_fish_data_paths()
@@ -211,6 +215,7 @@ def clean_version_run_brain_segmentation_unix():
 
         #brain_segmentation_nifty(fish_env.fixed_data_env, fish_env.moving_data_env)
         brain_segmentation_ants(fish_env.fixed_data_env, fish_env.moving_data_env)
+
 
 def scaling_aligning():
     fish_num_array = np.array([200, 204, 215, 223, 226, 228, 230, 231, 233, 238, 243])
@@ -227,5 +232,4 @@ def scaling_aligning():
 
 if __name__ == "__main__":
     #run_spine_segmentation("C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish204\\fish204_aligned_32bit_60x207x1220.raw")
-    #clean_version_run_brain_segmentation_unix()
-    print _build_fish_env(202, 204)
+    clean_version_run_brain_segmentation_unix()

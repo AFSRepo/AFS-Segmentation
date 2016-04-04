@@ -1,6 +1,11 @@
+import os
 import timeit
 import numpy as np
-import wmi
+
+if os.name == 'posix':
+    import psutil
+else:
+    import wmi
 
 class BBox(object):
     def __init__(self, *args, **kwargs):
@@ -123,8 +128,14 @@ def timing(f):
     return wrap
 
 def print_available_ram():
-    pc = wmi.WMI()
-    total, available = float(pc.Win32_ComputerSystem()[0].TotalPhysicalMemory) / 1024. / 1024., float(pc.Win32_OperatingSystem()[0].FreePhysicalMemory) / 1024.
+    total, available = -1, -1
+
+    if os.name == 'posix':
+        stats = psutil.virtual_memory()
+        total, available = stats[0] / 1024. / 1024., stats[4] / 1024. / 1024.
+    else:
+        pc = wmi.WMI()
+        total, available = float(pc.Win32_ComputerSystem()[0].TotalPhysicalMemory) / 1024. / 1024., float(pc.Win32_OperatingSystem()[0].FreePhysicalMemory) / 1024.
 
     fraction = available/total
 

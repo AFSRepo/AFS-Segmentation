@@ -19,7 +19,7 @@ class DataEnvironment(object):
         self.envs['target_data_path'] = None
         self.envs['input_data_labels_path'] = None
         self.envs['input_data_spine_labels_path'] = None
-
+        
         self.envs['filename_ext'] = os.path.basename(input_filepath)
         self.envs['filename_no_ext'] = os.path.splitext(os.path.basename(input_filepath))[0]
 
