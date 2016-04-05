@@ -240,7 +240,7 @@ def _get_reference_landmark_orientation(ref_data, bb_side_offset=20):
     '''
     binarized_stack, bbox, eyes_stats = binarizator(ref_data)
     binary_stack_stats, _ = object_counter(binarized_stack)
-    largest_volume_region, largest_volume_region_bbox = extract_largest_area_data(input_data, binary_stack_stats, bb_side_offset=bb_side_offset, force_bbox_fit=False, pad_data=True)
+    largest_volume_region, largest_volume_region_bbox, _ = extract_largest_area_data(input_data, binary_stack_stats, bb_side_offset=bb_side_offset, force_bbox_fit=False, pad_data=True)
 
     stack_statistics, _ = gather_statistics(largest_volume_region)
     eyes_stats = eyes_statistics(stack_statistics)
@@ -372,8 +372,8 @@ def check_vertical_orientation(data, data_label=None, eyes_stats=None):
     flipped_data, flipped = _flip_y(data, head_slice_idx)
 
     flipped_data_label = None
-    if flipped and data_label is not None:
-        flipped_data_label = data_label[:,::-1,:]
+    if data_label is not None:
+        flipped_data_label = data_label[:,::-1,:] if flipped else data_label
 
     del data
     if data_label is not None:
@@ -407,7 +407,7 @@ def _align_by_eyes_centroids(data, centroids, data_label=None, interp_order=3):
     interp_data, R, origin_point = rotate_around_vector(data, eye_c, rot_axis, -theta, interp_order=interp_order)
 
     interp_data_label = None
-    if interp_data_label is not None:
+    if data_label is not None:
         interp_data_label, _, _ = rotate_around_vector(data_label, eye_c, rot_axis, -theta, interp_order=0)
 
     return interp_data, interp_data_label, R, origin_point
@@ -438,8 +438,10 @@ def align_eyes_centroids(data, data_label=None, eyes_stats=None):
     print_available_ram()
 
     print 'Aligning of eyes\' centroids - Aligning along x- and y-axes...'
-    aligned_data, aligned_data_label, R, origin_point  = _align_by_eyes_centroids(data, eyes_coms, \
-                                                                                    data_label=data_label)
+    aligned_data, aligned_data_label, R, origin_point  = \
+                                            _align_by_eyes_centroids(data, \
+                                                                     eyes_coms, \
+                                                                     data_label=data_label)
 
     del data
 
@@ -460,16 +462,20 @@ def align_tail_part(input_data, input_data_label=None, landmark_tail_idx_frac=0.
     print 'Aligning of tail part - Extracting z-bounded data...'
     binarized_stack, bbox, eyes_stats = binarizator(input_data)
     binary_stack_stats, thresholded_data = object_counter(binarized_stack)
-    largest_volume_region, largest_volume_region_bbox = \
+    largest_volume_region, _, _ = \
                     extract_largest_area_data(input_data, binary_stack_stats, bb_side_offset=bb_side_offset, \
-                                              force_bbox_fit=False, pad_data=True, extact_axes=(0,), \
+                                              force_bbox_fit=False, pad_data=True, extract_axes=(0,), \
                                               force_positiveness=False)
-    largest_volume_region_label = None
-    if input_data_label is not None:
-        largest_volume_region_label = input_data_label[largest_volume_region_bbox]
-        del input_data_label
 
     del thresholded_data, binarized_stack
+
+    largest_volume_region_label = None
+    if input_data_label is not None:
+        largest_volume_region_label, _, _ = \
+                        extract_largest_area_data(input_data_label, binary_stack_stats, bb_side_offset=bb_side_offset, \
+                                                  force_bbox_fit=False, pad_data=True, extract_axes=(0,), \
+                                                  force_positiveness=False)
+        del input_data_label
 
     print 'Aligning of tail part - Finding eyes...'
     stack_statistics, inversed_thresholded_data = gather_statistics(largest_volume_region)
@@ -519,27 +525,33 @@ def align_tail_part(input_data, input_data_label=None, landmark_tail_idx_frac=0.
     if largest_volume_region_label is not None:
         data_label_rotated, _, _ = rotate_around_vector(largest_volume_region_label, eye_c, \
             rot_axis, theta, interp_order=0)
-    
+
         del largest_volume_region_label
-    
+
 
     print 'Aligning of tail part - Extracting aligned data...'
     data_rotated_binarized_stack, _, _ = binarizator(data_rotated)
     data_rotated_binary_stack_stats, thresholded_stack = object_counter(data_rotated_binarized_stack)
-    largest_data_rotated_region, largest_data_rotated_region_bbox = \
+
+    largest_data_rotated_region, _, _  = \
                 extract_largest_area_data(data_rotated, \
                                           data_rotated_binary_stack_stats, \
                                           bb_side_offset=bb_side_offset, \
                                           force_bbox_fit=False, \
                                           pad_data=True, \
                                           force_positiveness=False)
-    
+
     del data_rotated, thresholded_stack, data_rotated_binarized_stack
-    
+
     largest_data_label_rotated_region = None
     if data_label_rotated is not None:
-        largest_data_label_rotated_region = \
-            data_label_rotated[largest_data_rotated_region_bbox]
+        largest_data_label_rotated_region, _, _  = \
+                        extract_largest_area_data(data_label_rotated, \
+                                                  data_rotated_binary_stack_stats, \
+                                                  bb_side_offset=bb_side_offset, \
+                                                  force_bbox_fit=False, \
+                                                  pad_data=True, \
+                                                  force_positiveness=False)
 
         del data_label_rotated
 
@@ -677,8 +689,12 @@ def align_fish_by_eyes_tail(input_data, input_data_label=None, landmark_tail_idx
     flipped_z_data, flipped_z_data_label, flipped_z_eyes_stats = \
         check_depth_orientation(input_data, data_label=input_data_label)
 
+    print 'flipped_z_data_label is None = %s, %s' % (str(flipped_z_data_label is None), flipped_z_data_label.shape)
+
     aligned_data, aligned_data_label, aligned_eyes_stats = \
         align_eyes_centroids(flipped_z_data, data_label=flipped_z_data_label, eyes_stats=flipped_z_eyes_stats)
+
+    print 'aligned_data_label is None = %s, %s' % (str(aligned_data_label is None), aligned_data_label.shape)
 
     del flipped_z_data, flipped_z_eyes_stats
 
@@ -689,6 +705,8 @@ def align_fish_by_eyes_tail(input_data, input_data_label=None, landmark_tail_idx
                                             check_vertical_orientation(aligned_data, \
                                                                        data_label=aligned_data_label, \
                                                                        eyes_stats=aligned_eyes_stats)
+
+    print 'flipped_y_data_label is None = %s, %s' % (str(flipped_y_data_label is None), flipped_y_data_label.shape)
 
     del aligned_data, aligned_eyes_stats
 
@@ -702,6 +720,8 @@ def align_fish_by_eyes_tail(input_data, input_data_label=None, landmark_tail_idx
                                                 spinal_angle=spinal_angle, \
                                                 interp_order=interp_order, \
                                                 bb_side_offset=bb_side_offset)
+
+    print 'tail_aligned_data_label is None = %s, %s' % (str(tail_aligned_data_label is None), tail_aligned_data_label.shape)
 
     del flipped_y_data, flipped_y_eyes_stats
 

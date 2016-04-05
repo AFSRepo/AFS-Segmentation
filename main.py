@@ -230,17 +230,18 @@ def scaling_aligning():
     fish_num_array = np.array([230, 231, 233, 238, 243])
     align_fishes(fish_num_array, output_zoom_dir, output_align_dir)
 
+def _get_fish_path(fish_num, zoom_level=2, isLabel=False):
+    return get_path_by_name(fish_num, os.path.join(INPUT_DIR, 'fish%d' % fish_num, '@%d' % zoom_level), isFindLabels=isLabel)
+
 
 if __name__ == "__main__":
     #run_spine_segmentation("C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish204\\fish204_aligned_32bit_60x207x1220.raw")
     #clean_version_run_brain_segmentation_unix()
 
-    fish_env = _build_fish_env(202, 204)
-
     t = Timer()
 
-    input_path = fish_env.target_input_path
-    input_label_path = fish_env.fixed_data_env.get_input_labels_path()
+    input_path = _get_fish_path(200, zoom_level=2)
+    input_label_path = _get_fish_path(200, zoom_level=2, isLabel=True)
 
     print 'ip = %s' % input_path
     print 'ipl = %s' % input_label_path
@@ -249,12 +250,12 @@ if __name__ == "__main__":
     input_data_label = open_data(input_label_path)
 
     aligned_data, aligned_data_label = align_fish_by_eyes_tail(input_data, \
-            input_data_label=input_data_label) 
+            input_data_label=input_data_label)
 
     name, bits, size, ext = parse_filename(input_path)
     output_file = create_filename_with_shape(input_path, aligned_data.shape, prefix="aligned")
 
-    name, bits, size, ext = parse_filename(input_label_path)
+    name_label, bits_label, size_label, ext_label = parse_filename(input_label_path)
     output_label_file = create_filename_with_shape(input_label_path, \
             aligned_data_label.shape, prefix="aligned_label")
 
@@ -266,7 +267,7 @@ if __name__ == "__main__":
     print 'Output label: %s' % output_label_path
 
     aligned_data.astype('float%d' % bits).tofile(output_path)
-    aligned_data_label.astype('uint%d' % bits).tofile(output_label_path)
+    aligned_data_label.astype('uint%d' % bits_label).tofile(output_label_path)
 
     del input_data, aligned_data
 
@@ -274,5 +275,3 @@ if __name__ == "__main__":
         del input_data_label
 
     t.elapsed('Aligning')
-
-

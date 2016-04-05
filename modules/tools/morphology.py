@@ -66,6 +66,10 @@ def gather_statistics(stack_data, filter_size=1, non_zeros_ratio=0.5, \
     print 'Gathering statistics...'
 
     for slice_idx in np.arange(num_slices):
+        if not np.count_nonzero(stack_data[slice_idx]):
+            thresholded_stack[slice_idx] = np.zeros_like(thresholded_stack[slice_idx])
+            continue
+
         threshold_val = threshold_otsu(stack_data[slice_idx])
         thresholded_stack[slice_idx] = stack_data[slice_idx] < threshold_val if is_inverse \
                                        else stack_data[slice_idx] >= threshold_val
@@ -288,7 +292,7 @@ def cell_counter(slice_binary_data, min_area=0.0, min_circularity=0.0, slice_ind
 
 def extract_data_by_label(stack_data, stack_stats, label, bb_side_offset=0, \
                           force_bbox_fit=True, pad_data=False, \
-                          extact_axes=(0,1,2), force_positiveness=True):
+                          extract_axes=(0,1,2), force_positiveness=True):
     filtered_stats = stack_stats[stack_stats['label'] == label].head(1)
     bbox = BBox(filtered_stats.to_dict('records')[0])
     print "extracted_data_by_label = %s" % str(filtered_stats.to_dict('records')[0])
@@ -325,22 +329,22 @@ def extract_data_by_label(stack_data, stack_stats, label, bb_side_offset=0, \
 
     #print 'PADDED DATA SHAPE: %s' % str(stack_data.shape)
     tuple_bbox = tuple([shift_negative_idx(s) for s in tuple_bbox])
-    extration_bbox = tuple([s if i in extact_axes else np.s_[:] for i,s in enumerate(tuple_bbox)])
+    extration_bbox = tuple([s if i in extract_axes else np.s_[:] for i,s in enumerate(tuple_bbox)])
 
     #print 'BBOX: %s' % str(tuple_bbox)
     #print 'EXTRACTION BBOX: %s' % str(extration_bbox)
 
-    return stack_data[extration_bbox], tuple_bbox
+    return stack_data[extration_bbox], tuple_bbox, extration_bbox
 
 def extract_largest_area_data(stack_data, stack_stats, bb_side_offset=0, \
                               force_bbox_fit=True, pad_data=False, \
-                              extact_axes=(0,1,2), force_positiveness=True):
+                              extract_axes=(0,1,2), force_positiveness=True):
     filtered_stats = stack_stats.sort(['area'], ascending=False).head(1)
 
     return extract_data_by_label(stack_data, stack_stats, \
             filtered_stats['label'].values[0], bb_side_offset=bb_side_offset, \
                 force_bbox_fit=force_bbox_fit, pad_data=pad_data, \
-                    extact_axes=extact_axes, force_positiveness=force_positiveness)
+                    extract_axes=extract_axes, force_positiveness=force_positiveness)
 
 def _calc_sphericity(area, perimeter):
     r = ((3.0 * area) / (4.0 * np.pi)) ** (1.0/3.0)
