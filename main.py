@@ -185,6 +185,7 @@ class FishDataEnv:
 
         return text
 
+
 def _build_fish_env(reference_fish_num, target_fish_num):
     print os.path.join(OUTPUT_DIR, 'fish%d' % reference_fish_num)
     print get_path_by_name(reference_fish_num, os.path.join(INPUT_DIR, 'fish%d' % reference_fish_num))
@@ -232,4 +233,46 @@ def scaling_aligning():
 
 if __name__ == "__main__":
     #run_spine_segmentation("C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish204\\fish204_aligned_32bit_60x207x1220.raw")
-    clean_version_run_brain_segmentation_unix()
+    #clean_version_run_brain_segmentation_unix()
+
+    fish_env = _build_fish_env(202, 204)
+
+    t = Timer()
+
+    input_path = fish_env.target_input_path
+    input_label_path = fish_env.fixed_data_env.get_input_labels_path()
+
+    print 'ip = %s' % input_path
+    print 'ipl = %s' % input_label_path
+
+    input_data = open_data(input_path)
+    input_data_label = open_data(input_label_path)
+
+    aligned_data, aligned_data_label = align_fish_by_eyes_tail(input_data, \
+            input_data_label=input_data_label) 
+
+    name, bits, size, ext = parse_filename(input_path)
+    output_file = create_filename_with_shape(input_path, aligned_data.shape, prefix="aligned")
+
+    name, bits, size, ext = parse_filename(input_label_path)
+    output_label_file = create_filename_with_shape(input_label_path, \
+            aligned_data_label.shape, prefix="aligned_label")
+
+
+    output_path = os.path.join(OUTPUT_DIR, output_file)
+    output_label_path = os.path.join(OUTPUT_DIR, output_label_file)
+
+    print 'Output: %s' % output_path
+    print 'Output label: %s' % output_label_path
+
+    aligned_data.astype('float%d' % bits).tofile(output_path)
+    aligned_data_label.astype('uint%d' % bits).tofile(output_label_path)
+
+    del input_data, aligned_data
+
+    if input_data_label is not None:
+        del input_data_label
+
+    t.elapsed('Aligning')
+
+

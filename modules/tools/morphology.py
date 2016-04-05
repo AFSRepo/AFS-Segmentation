@@ -313,9 +313,9 @@ def extract_data_by_label(stack_data, stack_stats, label, bb_side_offset=0, \
         x_begin_pad, x_end_pad = np.abs(tuple_bbox[2].start) if tuple_bbox[2].start < 0 else 0, \
                                  tuple_bbox[2].stop - stack_data.shape[2] \
                                         if tuple_bbox[2].stop > stack_data.shape[2] else 0
-        padding_sides = tuple([tuple([z_begin_pad, z_end_pad]), \
-                               tuple([y_begin_pad, y_end_pad]), \
-                               tuple([x_begin_pad, x_end_pad])])
+        padding_sides = tuple([tuple([int(z_begin_pad), int(z_end_pad)]), \
+                               tuple([int(y_begin_pad), int(y_end_pad)]), \
+                               tuple([int(x_begin_pad), int(x_end_pad)])])
         print 'Padding: %s' % str(padding_sides)
         stack_data = np.pad(stack_data, padding_sides, mode='constant')
 

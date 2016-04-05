@@ -9,7 +9,7 @@ from scipy.ndimage.morphology import binary_opening, binary_fill_holes, binary_c
 from modules.tools.morphology import cell_counter, gather_statistics, extract_largest_area_data
 from scipy.ndimage.measurements import label, find_objects, center_of_mass
 from scipy.ndimage.filters import median_filter
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
 import numpy.polynomial.polynomial as poly
 from mpl_toolkits.mplot3d import Axes3D
 from modules.tools.io import open_data
@@ -258,14 +258,14 @@ def fit_spine(x, y, z, z_new):
     coefs = poly.polyfit(z, zip(x,y), 3)
     y_fitted = poly.polyval(z_new, coefs)
 
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d')
-    ax.plot(y_fitted[0], y_fitted[1], z_new, label='spine')
-    ax.scatter(x, y, z)
-    ax.set_xlabel('X axis')
-    ax.set_ylabel('Y axis')
-    ax.set_zlabel('Z axis')
-    plt.show()
+    #fig = plt.figure()
+    #ax = fig.add_subplot(111, projection='3d')
+    #ax.plot(y_fitted[0], y_fitted[1], z_new, label='spine')
+    #ax.scatter(x, y, z)
+    #ax.set_xlabel('X axis')
+    #ax.set_ylabel('Y axis')
+    #ax.set_zlabel('Z axis')
+    #plt.show()
 
 def _segment_cirlces(rng, spine_data):
     total_stats = pd.DataFrame()
@@ -486,13 +486,13 @@ def plot_spine_example2():
 
     dims = [np.arange(v) for v in filled_spine_seg.shape]
     x,y,z = np.meshgrid(*dims)
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d')
-    ax.scatter(x, y, z)
-    ax.set_xlabel('X axis')
-    ax.set_ylabel('Y axis')
-    ax.set_zlabel('Z axis')
-    plt.show()
+    #fig = plt.figure()
+    #ax = fig.add_subplot(111, projection='3d')
+    #ax.scatter(x, y, z)
+    #ax.set_xlabel('X axis')
+    #ax.set_ylabel('Y axis')
+    #ax.set_zlabel('Z axis')
+    #plt.show()
 
 def run_spine_segmentation(spine_path):
     '''
