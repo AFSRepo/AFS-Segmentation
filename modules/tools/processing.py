@@ -3,16 +3,19 @@ import gc
 import numpy as np
 import pandas as pd
 from operator import attrgetter
+from multiprocessing import Process, Pool
 from scipy.ndimage import map_coordinates
 from scipy.ndimage.filters import median_filter
 from scipy.ndimage.morphology import binary_dilation, binary_closing, binary_fill_holes, binary_opening
 from scipy.ndimage.measurements import label, find_objects
+from scipy.ndimage.interpolation import zoom, rotate
 from skimage.filters import threshold_otsu, threshold_li
 from skimage.morphology import disk, white_tophat
 from skimage.measure import regionprops
 from ..segmentation.eyes import eyes_statistics, eyes_zrange
 from .morphology import object_counter, gather_statistics, extract_largest_area_data, stats_at_slice, rotate_stats, flip_stats
-from .misc import timing
+from .misc import timing, Timer
+from .io import get_path_by_name, INPUT_DIR, OUTPUT_DIR, LSDF_DIR, create_filename_with_shape, parse_filename
 
 def binarizator(stack_data, eyes_stats=None, filter_size=6,
         non_zeros_ratio=0.5, tolerance=50, preserve_big_objects=True, verbose=False):
@@ -533,7 +536,7 @@ def align_tail_part(input_data, input_data_label=None, landmark_tail_idx_frac=0.
     data_rotated_binarized_stack, _, _ = binarizator(data_rotated)
     data_rotated_binary_stack_stats, thresholded_stack = object_counter(data_rotated_binarized_stack)
 
-    largest_data_rotated_region, _, _  = \
+    largest_data_rotated_region, _, extration_bbox  = \
                 extract_largest_area_data(data_rotated, \
                                           data_rotated_binary_stack_stats, \
                                           bb_side_offset=bb_side_offset, \
@@ -555,7 +558,7 @@ def align_tail_part(input_data, input_data_label=None, landmark_tail_idx_frac=0.
 
         del data_label_rotated
 
-    return largest_data_rotated_region, largest_data_label_rotated_region
+    return largest_data_rotated_region, largest_data_label_rotated_region, extration_bbox
 
 TMP_PATH = "C:\\Users\\Administrator\\Documents\\tmp"
 #filepath = "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish200\\fish200_rotated_32bit_286x286x1235.raw"
@@ -689,12 +692,13 @@ def align_fish_by_eyes_tail(input_data, input_data_label=None, landmark_tail_idx
     flipped_z_data, flipped_z_data_label, flipped_z_eyes_stats = \
         check_depth_orientation(input_data, data_label=input_data_label)
 
-    print 'flipped_z_data_label is None = %s, %s' % (str(flipped_z_data_label is None), flipped_z_data_label.shape)
+
+    print 'flipped_z_data_label is None = %s' % str(flipped_z_data_label is None)
 
     aligned_data, aligned_data_label, aligned_eyes_stats = \
         align_eyes_centroids(flipped_z_data, data_label=flipped_z_data_label, eyes_stats=flipped_z_eyes_stats)
 
-    print 'aligned_data_label is None = %s, %s' % (str(aligned_data_label is None), aligned_data_label.shape)
+    print 'aligned_data_label is None = %s' % str(aligned_data_label is None)
 
     del flipped_z_data, flipped_z_eyes_stats
 
@@ -706,14 +710,14 @@ def align_fish_by_eyes_tail(input_data, input_data_label=None, landmark_tail_idx
                                                                        data_label=aligned_data_label, \
                                                                        eyes_stats=aligned_eyes_stats)
 
-    print 'flipped_y_data_label is None = %s, %s' % (str(flipped_y_data_label is None), flipped_y_data_label.shape)
+    print 'flipped_y_data_label is None = %s' % str(flipped_y_data_label is None)
 
     del aligned_data, aligned_eyes_stats
 
     if aligned_data_label is not None:
         del aligned_data_label
 
-    tail_aligned_data, tail_aligned_data_label = \
+    tail_aligned_data, tail_aligned_data_label, extration_bbox = \
                                 align_tail_part(flipped_y_data, \
                                                 input_data_label=flipped_y_data_label, \
                                                 landmark_tail_idx_frac=landmark_tail_idx_frac, \
@@ -721,11 +725,342 @@ def align_fish_by_eyes_tail(input_data, input_data_label=None, landmark_tail_idx
                                                 interp_order=interp_order, \
                                                 bb_side_offset=bb_side_offset)
 
-    print 'tail_aligned_data_label is None = %s, %s' % (str(tail_aligned_data_label is None), tail_aligned_data_label.shape)
+    print 'tail_aligned_data_label is None = %s' % str(tail_aligned_data_label is None)
 
     del flipped_y_data, flipped_y_eyes_stats
 
     if flipped_y_data_label is not None:
         del flipped_y_data_label
 
-    return tail_aligned_data, tail_aligned_data_label
+    return tail_aligned_data, tail_aligned_data_label, extration_bbox
+
+def convert_fish(fish_number):
+    print '----Converting fish #%d' % fish_number
+    dir_path = os.path.join(LSDF_DIR, 'grif', 'ANKA_data', '2014', 'XRegioMay2014', 'tomography', 'Phenotyping', 'Recon', 'fish%d', 'Complete', 'Corr')
+    dir_path = dir_path % fish_number
+    out_path = os.path.join(LSDF_DIR, 'grif', 'Phenotype_medaka', 'Originals', '%s')
+
+    raw_data_stack = create_raw_stack(dir_path, "fish%d_proj_" % fish_number)
+
+    print '----Raw stack creating fish #%d' % fish_number
+    raw_data_stack.tofile(out_path % ("fish%d_32bit_%dx%dx%d.raw" % \
+            (fish_number, raw_data_stack.shape[2], raw_data_stack.shape[1], raw_data_stack.shape[0])))
+    del raw_data_stack
+
+def convert_fish_in_parallel(fish_num_array, core=4):
+    t = Timer()
+
+    p = Pool(core)
+    p.map(convert_fish, fish_num_array)
+
+    t.elapsed('Fish converting')
+
+def zoom_chunk_fishes(args):
+    for arg in args:
+        zoom_rotate(arg)
+
+def zoom_in_parallel(fish_num_array, input_dir, output_dir, core=2):
+    t = Timer()
+
+    args = []
+    for fish_num in fish_num_array:
+        args.append(tuple([get_path_by_name(fish_num, input_dir), output_dir]))
+
+    processes = [Process(target=zoom_rotate, args=(ip,op,)) for ip,op in args]
+
+    for p in processes:
+        p.start()
+
+    for p in processes:
+        p.join()
+
+    t.elapsed('Zooming global')
+
+def align_fishes(fish_num_array, input_dir, output_dir):
+    for fish_num in fish_num_array:
+        t = Timer()
+
+        print 'Aligning started fish%d...' % fish_num
+
+        input_path = get_path_by_name(fish_num, input_dir)
+
+        print "Input: %s" % input_path
+
+        input_data = open_data(input_path)
+        aligned_data, aligned_data_label, extration_bbox  = align_fish_by_eyes_tail(input_data)
+
+        name, bits, size, ext = parse_filename(input_path)
+        output_file = create_filename_with_shape(input_path, aligned_data.shape, prefix="aligned")
+
+        output_path = os.path.join(output_dir, output_file)
+        print 'Output: %s' % output_path
+
+        aligned_data.astype('float%d' % bits).tofile(output_path)
+
+        del input_data, aligned_data
+
+        t.elapsed('Aligning')
+
+def zoom_fishes(fish_num_array, input_dir, output_dir):
+    for fish_num in fish_num_array:
+
+        t = Timer()
+
+        print 'Zooming started fish%d...' % fish_num
+
+        input_path = get_path_by_name(fish_num, input_dir)
+
+        print "Input: %s" % input_path
+
+        input_data = open_data(input_path)
+        zoomed_data = zoom(input_data, 0.5, order=3)
+
+        name, bits, size, ext = parse_filename(input_path)
+        output_file = create_filename_with_shape(input_path, zoomed_data.shape)
+
+        output_path = os.path.join(output_dir, output_file)
+
+        print 'Output: %s' % output_path
+
+        zoomed_data.astype('float%d' % bits).tofile(output_path)
+
+        t.elapsed('Zooming')
+
+def zoom_rotate(input_path, output_path, rotate_angle=0, rot_axis='z', in_folder=False):
+    t = Timer()
+
+    print "Input: %s" % input_path
+    print "Output: %s" % output_path
+
+    input_data = open_data(input_path)
+
+    print 'Zooming started...'
+    zoomed_data = zoom(input_data, 0.5, order=3)
+
+    if rot_axis == 'z':
+        axes = (2, 1)
+
+    rotated_data = None
+    prefix = ""
+    if rotate_angle != 0:
+        print 'Rotation started...'
+        rotated_data = rotate(zoomed_data, rotate_angle, axes=axes, order=3, reshape=False)
+        prefix = 'rotated'
+    else:
+        rotated_data = zoomed_data
+
+    name, bits, size, ext = parse_filename(input_path)
+    output_file = create_filename_with_shape(input_path, rotated_data.shape, prefix=prefix)
+
+    if in_folder:
+        output_path = os.path.join(output_path, name)
+        if not os.path.exists(output_path):
+            os.makedirs(output_path)
+
+    output_path = os.path.join(output_path, output_file)
+    print 'Output will be: %s' % output_path
+
+    rotated_data.tofile(output_path)
+
+    t.elapsed('Zoom and rotation: %s' % input_path)
+
+def _get_fish_folder(fish_num, zoom_level=2):
+    return os.path.join(INPUT_DIR, 'fish%d' % fish_num, '@%d' % zoom_level)
+
+def _get_aligned_fish_folder(fish_num, zoom_level=2):
+    return os.path.join(OUTPUT_DIR, 'Aligned', 'fish%d' % fish_num, '@%d' % zoom_level)
+
+def get_fish_path(fish_num, zoom_level=2, isLabel=False):
+    req_path = get_path_by_name(fish_num, os.path.join(INPUT_DIR, 'fish%d' % fish_num, '@%d' % zoom_level), isFindLabels=isLabel)
+
+    if req_path is None:
+        downsampled_data_path = None
+
+        for zl in [i for i in [1,2,4,8] if i < zoom_level]: #[1,2,4,8] - zoom levels
+            prev_zoom_level_data_path = get_path_by_name(fish_num, \
+                                                  _get_fish_folder(fish_num, zoom_level=zl), \
+                                                  isFindLabels=isLabel)
+            if prev_zoom_level_data_path is not None:
+                downsampled_data_path = downsample_data(prev_zoom_level_data_path, \
+                                                        _get_fish_folder(fish_num, zoom_level=zoom_level), \
+                                                        zoom_in_level=zoom_level/zl, \
+                                                        order=0 if isLabel else 3)
+                break
+
+        if downsampled_data_path is not None:
+            return downsampled_data_path
+        else:
+            return None
+    else:
+        return req_path
+
+def get_aligned_fish_paths(fish_num, zoom_level=2, min_zoom_level=2):
+    data_req_path = get_path_by_name(fish_num, \
+                                    _get_aligned_fish_folder(fish_num, zoom_level=zoom_level))
+    data_label_req_path = get_path_by_name(fish_num, \
+                                    _get_aligned_fish_folder(fish_num, zoom_level=zoom_level), \
+                                    isFindLabels=True)
+
+    print '###########data_req_path = %s' % data_req_path
+    print '###########data_label_req_path = %s' % data_label_req_path
+
+    if data_req_path is None:
+        downsampled_data_path, downsampled_data_label_path = None, None
+
+        for zl in [i for i in [1,2,4,8] if i < zoom_level]:
+            prev_zoom_level_data_path = get_path_by_name(fish_num, \
+                                                         _get_aligned_fish_folder(fish_num, zoom_level=zl))
+
+            prev_zoom_level_data_label_path = get_path_by_name(fish_num, \
+                                                                _get_aligned_fish_folder(fish_num, zoom_level=zl), \
+                                                                isFindLabels=True)
+
+            print 'prev_zoom_level_data_path = %s' % prev_zoom_level_data_path
+            print 'prev_zoom_level_data_label_path = %s' % prev_zoom_level_data_label_path
+
+
+            if prev_zoom_level_data_path is not None:
+                downsampled_data_path = downsample_data(prev_zoom_level_data_path, \
+                                                        _get_aligned_fish_folder(fish_num, zoom_level=zoom_level), \
+                                                        zoom_in_level=zoom_level/zl, \
+                                                        order=3)
+                print 'downsampled_data_path = %s' % downsampled_data_path
+
+                if prev_zoom_level_data_label_path is not None:
+                    downsampled_data_label_path = downsample_data(prev_zoom_level_data_label_path, \
+                                                                  _get_aligned_fish_folder(fish_num, zoom_level=zoom_level), \
+                                                                  zoom_in_level=zoom_level/zl, \
+                                                                  order=0)
+                    print 'downsampled_data_label_path = %s' % downsampled_data_label_path
+
+                break
+
+        if downsampled_data_path is not None:
+            return downsampled_data_path, downsampled_data_label_path
+        else:
+            produce_aligned_fish(fish_num, min_zoom_level=min_zoom_level)
+            return get_aligned_fish_paths(fish_num, zoom_level=zoom_level, min_zoom_level=min_zoom_level)
+    else:
+        return data_req_path, data_label_req_path
+
+def get_aligned_fish_path(fish_num, zoom_level=2, isLabel=False, min_zoom_level=2):
+    req_path = get_path_by_name(fish_num, \
+                                _get_aligned_fish_folder(fish_num, zoom_level=zoom_level), \
+                                isFindLabels=isLabel)
+    print '###########req_path = %s' % req_path
+    if req_path is None:
+        downsampled_data_path = None
+        for zl in [i for i in [1,2,4,8] if i < zoom_level]:
+            prev_zoom_level_data_path = get_path_by_name(fish_num, \
+                                                         _get_aligned_fish_folder(fish_num, zoom_level=zl), \
+                                                         isFindLabels=isLabel)
+            if prev_zoom_level_data_path is not None:
+                downsampled_data_path = downsample_data(prev_zoom_level_data_path, \
+                                                        _get_aligned_fish_folder(fish_num, zoom_level=zoom_level), \
+                                                        zoom_in_level=zoom_level/zl, \
+                                                        order=0 if isLabel else 3)
+                print "--------------------------------------DOWNLASMESD ( %s )!!!!!" % downsampled_data_path
+                break
+
+        if downsampled_data_path is not None:
+            return downsampled_data_path
+        else:
+            print "--------------------------------------WOW MAN? WHYYYY?"
+            produce_aligned_fish(fish_num, min_zoom_level=min_zoom_level)
+            print "--------------------------------------WOW MAN? WHYYYY? LOLLO"
+            get_aligned_fish_path(fish_num, zoom_level=zoom_level, isLabel=isLabel)
+    else:
+        return req_path
+
+def downsample_data(input_path, output_path, zoom_in_level=2, order=3):
+    t = Timer()
+
+    print "Input: %s" % input_path
+    print "Output: %s" % output_path
+
+    input_data = open_data(input_path)
+
+    print 'Zooming started...'
+    zoomed_data = zoom(input_data, 1./zoom_in_level, order=order)
+
+    name, bits, size, ext = parse_filename(input_path)
+    output_file = create_filename_with_shape(input_path, zoomed_data.shape)
+
+    if not os.path.exists(output_path):
+        os.makedirs(output_path)
+
+    output_path = os.path.join(output_path, output_file)
+    print 'Output will be: %s' % output_path
+
+    zoomed_data.tofile(output_path)
+
+    t.elapsed('Zoom by %f: %s' % (1./zoom_in_level, input_path))
+
+    return output_path
+
+def scaling_aligning():
+    fish_num_array = np.array([200, 204, 215, 223, 226, 228, 230, 231, 233, 238, 243])
+
+    input_dir = os.path.join(LSDF_DIR, 'grif', 'Phenotype_medaka', 'Misc', 'Originals')
+    output_zoom_dir = os.path.join(LSDF_DIR, 'grif', 'Phenotype_medaka', 'Misc', 'Originals_scaled')
+    output_align_dir = os.path.join(LSDF_DIR, 'grif', 'Phenotype_medaka', 'Misc', 'Originals_aligned')
+
+    zoom_fishes(fish_num_array, input_dir, output_zoom_dir)
+
+    fish_num_array = np.array([230, 231, 233, 238, 243])
+    align_fishes(fish_num_array, output_zoom_dir, output_align_dir)
+
+def produce_aligned_fish(fish_num, min_zoom_level=2):
+    non_aligned_data_path, non_aligned_data_label_path = \
+                    get_fish_path(fish_num, zoom_level=min_zoom_level), \
+                    get_fish_path(fish_num, zoom_level=min_zoom_level, isLabel=True)
+
+    print 'non_aligned_data_path = %s' % non_aligned_data_path
+    non_aligned_input_data = open_data(non_aligned_data_path)
+
+    non_aligned_input_data_label = None
+    if non_aligned_data_label_path is not None:
+        non_aligned_input_data_label = open_data(non_aligned_data_label_path)
+
+    aligned_data, aligned_data_label, extration_bbox = \
+                align_fish_by_eyes_tail(non_aligned_input_data, \
+                                        input_data_label=non_aligned_input_data_label)
+
+    name, bits, size, ext = parse_filename(non_aligned_data_path)
+    output_file = create_filename_with_shape(non_aligned_data_path, \
+                                             aligned_data.shape, \
+                                             prefix="aligned")
+    output_label_file = None
+    if non_aligned_data_label_path is not None:
+        name_label, bits_label, size_label, ext_label = parse_filename(non_aligned_data_label_path)
+        output_label_file = create_filename_with_shape(non_aligned_data_label_path, \
+                                                       aligned_data_label.shape, \
+                                                       prefix="aligned")
+
+    output_path = _get_aligned_fish_folder(fish_num, zoom_level=min_zoom_level)
+
+    if not os.path.exists(output_path):
+        os.makedirs(output_path)
+
+    output_data_path = os.path.join(output_path, output_file)
+    print 'aligned_data.tofile(output_data_path) = %s' % output_data_path
+    aligned_data.tofile(output_data_path)
+
+    if output_label_file is not None:
+        output_label_path = os.path.join(output_path, output_label_file)
+        print 'aligned_data_label.tofile(output_label_path) = %s' % output_label_path
+        aligned_data_label.tofile(output_label_path)
+
+def get_aligned_fish(fish_num, zoom_level=2, min_zoom_level=2):
+    input_aligned_data_path, input_aligned_data_label_path = get_aligned_fish_paths(fish_num, zoom_level=zoom_level, min_zoom_level=min_zoom_level)
+
+    print 'input_aligned_data_path = %s' % str(input_aligned_data_path)
+    print 'input_aligned_data_label_path = %s' % str(input_aligned_data_label_path)
+
+    input_aligned_data = open_data(input_aligned_data_path)
+
+    input_aligned_data_label = None
+    if input_aligned_data_label_path is not None:
+        input_aligned_data_label = open_data(input_aligned_data_label_path)
+
+    return input_aligned_data, input_aligned_data_label

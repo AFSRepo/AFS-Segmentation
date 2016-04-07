@@ -5,15 +5,66 @@ import numpy as np
 from modules.segmentation.eyes import eyes_statistics, eyes_zrange
 from modules.tools.morphology import object_counter, gather_statistics, extract_largest_area_data
 from modules.tools.io import get_filename, open_data, save_as_nifti, check_files, parse_filename
-from modules.tools.processing import binarizator
+from modules.tools.processing import binarizator, get_aligned_fish
 from modules.tools.env import DataEnvironment
 from modules.tools.misc import Timer
 from scipy.ndimage.interpolation import zoom, rotate
+from modules.tools.io import ANTS_SCRIPTS_PATH_FMT
 
 #ANTs - 0 , NiftyReg - 1
 REG_TOOL = 1
 
-ANTS_SCRIPTS_PATH_FMT = "~/ANKA_work/ANTs_Scripts/"
+def initialize_env(data_env):
+    phase_name = 'extracted_input_data_path_niigz'
+    phase_name_zoomed = 'zoomed_0p5_extracted_input_data_path_niigz'
+
+    data_env.load()
+
+    ext_volume_niigz_path = None
+    zoomed_ext_volume_niigz_path = None
+
+    ext_volume_labels_niigz_path = None
+    zoomed_ext_volume_labels_niigz_path = None
+
+    if not data_env.is_entry_exists(phase_name):
+        if data_env.get_input_path():
+            aligned_data, aligned_data_label = get_aligned_fish(fish_num, zoom_level=2)
+            zoomed_aligned_data, zoomed_aligned_data_label = get_aligned_fish(fish_num, zoom_level=4)
+
+            ext_volume_niigz_path = data_env.get_new_volume_niigz_path(aligned_data.shape, 'extracted')
+            zoomed_ext_volume_niigz_path = data_env.get_new_volume_niigz_path(zoomed_aligned_data.shape, 'zoomed_0p5_extracted')
+
+            save_as_nifti(aligned_data, ext_volume_niigz_path)
+            save_as_nifti(zoomed_aligned_data, zoomed_ext_volume_niigz_path)
+
+            data_shape = aligned_data.shape
+            zoomed_data_shape = zoomed_aligned_data.shape
+
+            data_bbox = np.index_exp[:data_shape[0], :data_shape[1], :data_shape[2]]
+            zoomed_data_bbox = np.index_exp[:zoomed_data_shape[0], :zoomed_data_shape[1], :zoomed_data_shape[2]]
+
+            data_env.set_effective_volume_bbox(data_bbox)
+            data_env.set_zoomed_effective_volume_bbox(zoomed_data_bbox)
+
+            if data_env.get_input_labels_path():
+                ext_volume_labels_niigz_path = data_env.get_new_volume_labels_niigz_path(aligned_data_label.shape, 'extracted')
+                zoomed_ext_volume_labels_niigz_path = data_env.get_new_volume_labels_niigz_path(zoomed_aligned_data_label.shape, 'zoomed_0p5_extracted')
+
+                save_as_nifti(aligned_data_label, ext_volume_labels_niigz_path)
+                save_as_nifti(zoomed_aligned_data_label, zoomed_ext_volume_labels_niigz_path)
+
+                print "Abdomen and brain labels are written and zoomed"
+        else:
+            print 'There\'s no input data'
+
+        data_env.save()
+
+        t.elapsed('Data preparing is finished')
+    else:
+        print 'Files of \'%s\' phase are already in working directory: %s' % (phase_name, data_env.get_working_path())
+
+    return {'scaled_0p5_extracted': zoomed_ext_volume_niigz_path, 'extracted': ext_volume_niigz_path, \
+            'scaled_0p5_extracted_labels': zoomed_ext_volume_labels_niigz_path, 'extracted_labels': ext_volume_labels_niigz_path}
 
 def produce_cropped_data(data_env):
     phase_name = 'extracted_input_data_path_niigz'
@@ -2390,80 +2441,79 @@ def brain_segmentation(fixed_data_env, moving_data_env, use_full_size=False):
     else:
         print "The initially aligned completed unknown fish's brain labels is already upscaled to the input volume size."
 
-def brain_segmentation_ants(fixed_data_env, moving_data_env):
-
-    fixed_data_env.load()
-    moving_data_env.load()
+def brain_segmentation_ants(reference_data_env, target_data_env):
+    reference_data_env.load()
+    target_data_env.load()
 
     # Crop the raw data
-    print "--Extracting net volumes"
-    fixed_data_results = produce_cropped_data(fixed_data_env)
-    moving_data_results = produce_cropped_data(moving_data_env)
+    print "--Aligning and volumes' extraction"
+    reference_data_results = initialize_env(reference_data_env)
+    moving_data_results = initialize_env(target_data_env)
 
-    fixed_data_env.save()
-    moving_data_env.save()
+    reference_data_env.save()
+    target_data_env.save()
 
-    #generate_stats(fixed_data_env)
-    #generate_stats(moving_data_env)
+    #generate_stats(reference_data_env)
+    #generate_stats(target_data_env)
 
-    print "--Pre-alignment of the unknown fish to the known one"
+    print "--Pre-alignment of the target fish to the known one"
     # Pre-alignment fish1 to fish_aligned
     ants_prefix_prealign = 'pre_alignment'
-    ants_prealign_paths = moving_data_env.get_aligned_data_paths(ants_prefix_prealign)
-    ants_prealign_names = moving_data_env.get_aligned_data_paths(ants_prefix_prealign, produce_paths=False)
+    ants_prealign_paths = target_data_env.get_aligned_data_paths(ants_prefix_prealign)
+    ants_prealign_names = target_data_env.get_aligned_data_paths(ants_prefix_prealign, produce_paths=False)
 
-    working_env_prealign = moving_data_env
-    fixed_image_path_prealign = fixed_data_env.envs['zoomed_0p5_extracted_input_data_path_niigz']
-    fixed_image_path_prealign_raw = fixed_data_env.envs['zoomed_0p5_extracted_input_data_path']
-    moving_image_path_prealign = moving_data_env.envs['zoomed_0p5_extracted_input_data_path_niigz']
+    working_env_prealign = target_data_env
+    reference_image_path_prealign = reference_data_env.envs['zoomed_0p5_extracted_input_data_path_niigz']
+    reference_image_path_prealign_raw = reference_data_env.envs['zoomed_0p5_extracted_input_data_path']
+    target_image_path_prealign = target_data_env.envs['zoomed_0p5_extracted_input_data_path_niigz']
     output_name_prealign = ants_prealign_names['out_name']
     warped_path_prealign = ants_prealign_paths['warped']
     iwarped_path_prealign = ants_prealign_paths['iwarp']
 
     if not os.path.exists(warped_path_prealign):
-        align_fish_simple_ants(working_env_prealign, fixed_image_path_prealign,\
-                               moving_image_path_prealign, output_name_prealign, \
+        align_fish_simple_ants(working_env_prealign, reference_image_path_prealign,\
+                               target_image_path_prealign, output_name_prealign, \
                                warped_path_prealign, iwarped_path_prealign, \
                                reg_prefix=ants_prefix_prealign, use_syn=False, \
                                use_full_iters=False)
 
-        fixed_data_env.save()
-        moving_data_env.save()
+        reference_data_env.save()
+        target_data_env.save()
     else:
         print "Data is already prealigned"
 
-    print  "--Registration of the known fish to the unknown one"
+    print  "--Registration of the reference fish to the target one"
     # Registration of fish_aligned to fish1
     ants_prefix_sep = 'parts_separation'
-    ants_separation_paths = fixed_data_env.get_aligned_data_paths(ants_prefix_sep)
-    working_env_sep = fixed_data_env
-    fixed_image_path_sep = warped_path_prealign
-    moving_image_path_sep = fixed_image_path_prealign
+    ants_separation_paths = reference_data_env.get_aligned_data_paths(ants_prefix_sep)
+    working_env_sep = reference_data_env
+    reference_image_path_sep = warped_path_prealign
+    target_image_path_sep = reference_image_path_prealign
     output_name_sep = ants_separation_paths['out_name']
     warped_path_sep = ants_separation_paths['warped']
     iwarped_path_sep = ants_separation_paths['iwarp']
 
     if not os.path.exists(warped_path_sep):
-        align_fish_simple_ants(working_env_sep, fixed_image_path_sep, moving_image_path_sep, \
+        align_fish_simple_ants(working_env_sep, reference_image_path_sep, target_image_path_sep, \
                                output_name_sep, warped_path_sep, iwarped_path_sep, \
                                reg_prefix=ants_prefix_sep, use_syn=True, use_full_iters=False)
 
-        fixed_data_env.save()
-        moving_data_env.save()
+        reference_data_env.save()
+        target_data_env.save()
     else:
         print "Data is already registered for separation"
 
-    print "--Transforming brain and abdomen labels of the known fish to the unknown's one"
+    print "--Transforming brain and abdomen labels of the reference fish to the target's one"
     # Transforming labels of fish_aligned to fish1
-    wokring_env_tr = moving_data_env
+    wokring_env_tr = target_data_env
     ref_image_path_tr = ants_prealign_paths['warped']
     affine_transformation_path_tr = ants_separation_paths['gen_affine']
     def_transformation_path_tr = ants_separation_paths['warp']
-    labels_image_path_tr = fixed_data_env.envs['zoomed_0p5_extracted_input_data_labels_path_niigz']
+    labels_image_path_tr = reference_data_env.envs['zoomed_0p5_extracted_input_data_labels_path_niigz']
 
-    __, __, new_size, __ = parse_filename(fixed_image_path_prealign_raw)
+    __, __, new_size, __ = parse_filename(reference_image_path_prealign_raw)
 
-    transformation_output_tr = moving_data_env.get_new_volume_niigz_path(new_size, 'zoomed_0p5_extracted_labels', bits=8)
+    transformation_output_tr = target_data_env.get_new_volume_niigz_path(new_size, 'zoomed_0p5_extracted_labels', bits=8)
     reg_prefix_tr = 'label_deforming'
 
     if not os.path.exists(transformation_output_tr):
@@ -2473,138 +2523,138 @@ def brain_segmentation_ants(fixed_data_env, moving_data_env):
                              def_transformation_path=def_transformation_path_tr, \
                              reg_prefix=reg_prefix_tr)
 
-        fixed_data_env.save()
-        moving_data_env.save()
+        reference_data_env.save()
+        target_data_env.save()
     else:
         print "Abdomen and brain data is already transformed"
 
-    #Separate head and tail of fixed image
-    print "--Fish separation (Fixed image)..."
-    abdomen_data_part_fixed_niigz_path = None
-    head_data_part_fixed_niigz_path = None
-    abdomen_data_part_labels_fixed_niigz_path = None
-    head_data_part_labels_fixed_niigz_path = None
+    #Separate head and tail of reference image
+    print "--Fish separation (reference image)..."
+    abdomen_data_part_reference_niigz_path = None
+    head_data_part_reference_niigz_path = None
+    abdomen_data_part_labels_reference_niigz_path = None
+    head_data_part_labels_reference_niigz_path = None
 
-    if not os.path.exists(fixed_data_env.envs['zoomed_0p5_abdomen_input_data_path_niigz']) or \
-       not os.path.exists(fixed_data_env.envs['zoomed_0p5_head_input_data_path_niigz']) or \
-       not os.path.exists(fixed_data_env.envs['zoomed_0p5_abdomen_labels_input_data_path_niigz']) or \
-       not os.path.exists(fixed_data_env.envs['zoomed_0p5_head_labels_input_data_path_niigz']):
+    if not os.path.exists(reference_data_env.envs['zoomed_0p5_abdomen_input_data_path_niigz']) or \
+       not os.path.exists(reference_data_env.envs['zoomed_0p5_head_input_data_path_niigz']) or \
+       not os.path.exists(reference_data_env.envs['zoomed_0p5_abdomen_labels_input_data_path_niigz']) or \
+       not os.path.exists(reference_data_env.envs['zoomed_0p5_head_labels_input_data_path_niigz']):
 
-        aligned_data_fixed = open_data(fixed_image_path_prealign)
-        aligned_data_labels_fixed = open_data(labels_image_path_tr)
+        aligned_data_reference = open_data(reference_image_path_prealign)
+        aligned_data_labels_reference = open_data(labels_image_path_tr)
 
-        separation_pos_fixed, abdomen_label_fixed_full, head_label_fixed_full = find_separation_pos(aligned_data_labels_fixed)
+        separation_pos_reference, abdomen_label_reference_full, head_label_reference_full = find_separation_pos(aligned_data_labels_reference)
 
-        abdomen_data_part_fixed, head_data_part_fixed = split_fish_by_pos(aligned_data_fixed, separation_pos_fixed, overlap=20)
-        abdomen_label_fixed, _ = split_fish_by_pos(abdomen_label_fixed_full, separation_pos_fixed, overlap=20)
-        _, head_label_fixed = split_fish_by_pos(head_label_fixed_full, separation_pos_fixed, overlap=20)
+        abdomen_data_part_reference, head_data_part_reference = split_fish_by_pos(aligned_data_reference, separation_pos_reference, overlap=20)
+        abdomen_label_reference, _ = split_fish_by_pos(abdomen_label_reference_full, separation_pos_reference, overlap=20)
+        _, head_label_reference = split_fish_by_pos(head_label_reference_full, separation_pos_reference, overlap=20)
 
-        abdomen_data_part_fixed_niigz_path = fixed_data_env.get_new_volume_niigz_path(abdomen_data_part_fixed.shape, 'zoomed_0p5_abdomen')
-        if not os.path.exists(abdomen_data_part_fixed_niigz_path):
-            save_as_nifti(abdomen_data_part_fixed, abdomen_data_part_fixed_niigz_path)
+        abdomen_data_part_reference_niigz_path = reference_data_env.get_new_volume_niigz_path(abdomen_data_part_reference.shape, 'zoomed_0p5_abdomen')
+        if not os.path.exists(abdomen_data_part_reference_niigz_path):
+            save_as_nifti(abdomen_data_part_reference, abdomen_data_part_reference_niigz_path)
 
-        head_data_part_fixed_niigz_path = fixed_data_env.get_new_volume_niigz_path(head_data_part_fixed.shape, 'zoomed_0p5_head')
-        if not os.path.exists(head_data_part_fixed_niigz_path):
-            save_as_nifti(head_data_part_fixed, head_data_part_fixed_niigz_path)
+        head_data_part_reference_niigz_path = reference_data_env.get_new_volume_niigz_path(head_data_part_reference.shape, 'zoomed_0p5_head')
+        if not os.path.exists(head_data_part_reference_niigz_path):
+            save_as_nifti(head_data_part_reference, head_data_part_reference_niigz_path)
 
-        abdomen_data_part_labels_fixed_niigz_path = fixed_data_env.get_new_volume_niigz_path(abdomen_label_fixed.shape, 'zoomed_0p5_abdomen_labels')
-        if not os.path.exists(abdomen_data_part_labels_fixed_niigz_path):
-            save_as_nifti(abdomen_label_fixed, abdomen_data_part_labels_fixed_niigz_path)
+        abdomen_data_part_labels_reference_niigz_path = reference_data_env.get_new_volume_niigz_path(abdomen_label_reference.shape, 'zoomed_0p5_abdomen_labels')
+        if not os.path.exists(abdomen_data_part_labels_reference_niigz_path):
+            save_as_nifti(abdomen_label_reference, abdomen_data_part_labels_reference_niigz_path)
 
-        head_data_part_labels_fixed_niigz_path = fixed_data_env.get_new_volume_niigz_path(head_label_fixed.shape, 'zoomed_0p5_head_labels')
-        if not os.path.exists(head_data_part_labels_fixed_niigz_path):
-            save_as_nifti(head_label_fixed, head_data_part_labels_fixed_niigz_path)
+        head_data_part_labels_reference_niigz_path = reference_data_env.get_new_volume_niigz_path(head_label_reference.shape, 'zoomed_0p5_head_labels')
+        if not os.path.exists(head_data_part_labels_reference_niigz_path):
+            save_as_nifti(head_label_reference, head_data_part_labels_reference_niigz_path)
 
-        print abdomen_data_part_labels_fixed_niigz_path
-        print head_data_part_labels_fixed_niigz_path
+        print abdomen_data_part_labels_reference_niigz_path
+        print head_data_part_labels_reference_niigz_path
 
-        fixed_data_env.save()
+        reference_data_env.save()
     else:
-        abdomen_data_part_fixed_niigz_path = fixed_data_env.envs['zoomed_0p5_abdomen_input_data_path_niigz']
-        head_data_part_fixed_niigz_path = fixed_data_env.envs['zoomed_0p5_head_input_data_path_niigz']
-        abdomen_data_part_labels_fixed_niigz_path = fixed_data_env.envs['zoomed_0p5_abdomen_labels_input_data_path_niigz']
-        head_data_part_labels_fixed_niigz_path = fixed_data_env.envs['zoomed_0p5_head_labels_input_data_path_niigz']
+        abdomen_data_part_reference_niigz_path = reference_data_env.envs['zoomed_0p5_abdomen_input_data_path_niigz']
+        head_data_part_reference_niigz_path = reference_data_env.envs['zoomed_0p5_head_input_data_path_niigz']
+        abdomen_data_part_labels_reference_niigz_path = reference_data_env.envs['zoomed_0p5_abdomen_labels_input_data_path_niigz']
+        head_data_part_labels_reference_niigz_path = reference_data_env.envs['zoomed_0p5_head_labels_input_data_path_niigz']
 
-    #Separate head and tail of moving image
-    print "--Fish separation (Moving image)..."
-    abdomen_data_part_moving_niigz_path = None
-    abdomen_data_part_labels_moving_niigz_path = None
-    head_data_part_moving_niigz_path = None
-    head_data_part_labels_moving_niigz_path = None
+    #Separate head and tail of target image
+    print "--Fish separation (target image)..."
+    abdomen_data_part_target_niigz_path = None
+    abdomen_data_part_labels_target_niigz_path = None
+    head_data_part_target_niigz_path = None
+    head_data_part_labels_target_niigz_path = None
 
-    if not os.path.exists(moving_data_env.envs['zoomed_0p5_abdomen_input_data_path_niigz']) or \
-       not os.path.exists(moving_data_env.envs['zoomed_0p5_head_input_data_path_niigz']) or \
-       not os.path.exists(moving_data_env.envs['zoomed_0p5_abdomen_labels_input_data_path_niigz']) or \
-       not os.path.exists(moving_data_env.envs['zoomed_0p5_head_labels_input_data_path_niigz']):
+    if not os.path.exists(target_data_env.envs['zoomed_0p5_abdomen_input_data_path_niigz']) or \
+       not os.path.exists(target_data_env.envs['zoomed_0p5_head_input_data_path_niigz']) or \
+       not os.path.exists(target_data_env.envs['zoomed_0p5_abdomen_labels_input_data_path_niigz']) or \
+       not os.path.exists(target_data_env.envs['zoomed_0p5_head_labels_input_data_path_niigz']):
 
-        aligned_data_moving = open_data(ants_prealign_paths['warped'])
-        aligned_data_labels_moving = open_data(transformation_output_tr)
+        aligned_data_target = open_data(ants_prealign_paths['warped'])
+        aligned_data_labels_target = open_data(transformation_output_tr)
 
-        separation_pos_moving, abdomen_label_moving_full, head_label_moving_full = find_separation_pos(aligned_data_labels_moving)
+        separation_pos_target, abdomen_label_target_full, head_label_target_full = find_separation_pos(aligned_data_labels_target)
 
-        abdomen_data_part_moving, head_data_part_moving = split_fish_by_pos(aligned_data_moving, separation_pos_moving, overlap=20)
-        abdomen_label_moving, _ = split_fish_by_pos(abdomen_label_moving_full, separation_pos_moving, overlap=20)
-        _, head_label_moving = split_fish_by_pos(head_label_moving_full, separation_pos_moving, overlap=20)
+        abdomen_data_part_target, head_data_part_target = split_fish_by_pos(aligned_data_target, separation_pos_target, overlap=20)
+        abdomen_label_target, _ = split_fish_by_pos(abdomen_label_target_full, separation_pos_target, overlap=20)
+        _, head_label_target = split_fish_by_pos(head_label_target_full, separation_pos_target, overlap=20)
 
-        abdomen_data_part_moving_niigz_path = moving_data_env.get_new_volume_niigz_path(abdomen_data_part_moving.shape, 'zoomed_0p5_abdomen')
-        if not os.path.exists(abdomen_data_part_moving_niigz_path):
-            save_as_nifti(abdomen_data_part_moving, abdomen_data_part_moving_niigz_path)
+        abdomen_data_part_target_niigz_path = target_data_env.get_new_volume_niigz_path(abdomen_data_part_target.shape, 'zoomed_0p5_abdomen')
+        if not os.path.exists(abdomen_data_part_target_niigz_path):
+            save_as_nifti(abdomen_data_part_target, abdomen_data_part_target_niigz_path)
 
-        head_data_part_moving_niigz_path = moving_data_env.get_new_volume_niigz_path(head_data_part_moving.shape, 'zoomed_0p5_head')
-        if not os.path.exists(head_data_part_moving_niigz_path):
-            save_as_nifti(head_data_part_moving, head_data_part_moving_niigz_path)
+        head_data_part_target_niigz_path = target_data_env.get_new_volume_niigz_path(head_data_part_target.shape, 'zoomed_0p5_head')
+        if not os.path.exists(head_data_part_target_niigz_path):
+            save_as_nifti(head_data_part_target, head_data_part_target_niigz_path)
 
-        abdomen_data_part_labels_moving_niigz_path = moving_data_env.get_new_volume_niigz_path(abdomen_label_moving.shape, 'zoomed_0p5_abdomen_labels')
-        if not os.path.exists(abdomen_data_part_labels_moving_niigz_path):
-            save_as_nifti(abdomen_label_moving, abdomen_data_part_labels_moving_niigz_path)
+        abdomen_data_part_labels_target_niigz_path = target_data_env.get_new_volume_niigz_path(abdomen_label_target.shape, 'zoomed_0p5_abdomen_labels')
+        if not os.path.exists(abdomen_data_part_labels_target_niigz_path):
+            save_as_nifti(abdomen_label_target, abdomen_data_part_labels_target_niigz_path)
 
-        head_data_part_labels_moving_niigz_path = moving_data_env.get_new_volume_niigz_path(head_label_moving.shape, 'zoomed_0p5_head_labels')
-        if not os.path.exists(head_data_part_labels_moving_niigz_path):
-            save_as_nifti(head_label_moving, head_data_part_labels_moving_niigz_path)
+        head_data_part_labels_target_niigz_path = target_data_env.get_new_volume_niigz_path(head_label_target.shape, 'zoomed_0p5_head_labels')
+        if not os.path.exists(head_data_part_labels_target_niigz_path):
+            save_as_nifti(head_label_target, head_data_part_labels_target_niigz_path)
 
-        print abdomen_data_part_labels_moving_niigz_path
-        print head_data_part_labels_moving_niigz_path
+        print abdomen_data_part_labels_target_niigz_path
+        print head_data_part_labels_target_niigz_path
 
-        moving_data_env.save()
+        target_data_env.save()
     else:
-        abdomen_data_part_moving_niigz_path = moving_data_env.envs['zoomed_0p5_abdomen_input_data_path_niigz']
-        abdomen_data_part_labels_moving_niigz_path = moving_data_env.envs['zoomed_0p5_abdomen_labels_input_data_path_niigz']
-        head_data_part_moving_niigz_path = moving_data_env.envs['zoomed_0p5_head_input_data_path_niigz']
-        head_data_part_labels_moving_niigz_path = moving_data_env.envs['zoomed_0p5_head_labels_input_data_path_niigz']
+        abdomen_data_part_target_niigz_path = target_data_env.envs['zoomed_0p5_abdomen_input_data_path_niigz']
+        abdomen_data_part_labels_target_niigz_path = target_data_env.envs['zoomed_0p5_abdomen_labels_input_data_path_niigz']
+        head_data_part_target_niigz_path = target_data_env.envs['zoomed_0p5_head_input_data_path_niigz']
+        head_data_part_labels_target_niigz_path = target_data_env.envs['zoomed_0p5_head_labels_input_data_path_niigz']
 
-    print "--Register known fish's head to the unknown's one..."
-    #Register fixed head to moving one
+    print "--Register reference fish's head to the target's one..."
+    #Register reference head to target one
     ants_prefix_head_reg = 'head_registration'
-    ants_head_reg_paths = fixed_data_env.get_aligned_data_paths(ants_prefix_head_reg)
-    working_env_head_reg = fixed_data_env
-    fixed_image_path_head_reg = head_data_part_moving_niigz_path
-    moving_image_path_head_reg = head_data_part_fixed_niigz_path
+    ants_head_reg_paths = reference_data_env.get_aligned_data_paths(ants_prefix_head_reg)
+    working_env_head_reg = reference_data_env
+    reference_image_path_head_reg = head_data_part_target_niigz_path
+    target_image_path_head_reg = head_data_part_reference_niigz_path
     output_name_head_reg = ants_head_reg_paths['out_name']
     warped_path_head_reg = ants_head_reg_paths['warped']
     iwarped_path_head_reg = ants_head_reg_paths['iwarp']
 
     if not os.path.exists(warped_path_head_reg):
-        align_fish_simple_ants(working_env_head_reg, fixed_image_path_head_reg, \
-                               moving_image_path_head_reg, output_name_head_reg, \
+        align_fish_simple_ants(working_env_head_reg, reference_image_path_head_reg, \
+                               target_image_path_head_reg, output_name_head_reg, \
                                warped_path_head_reg, iwarped_path_head_reg, \
                                reg_prefix=ants_prefix_head_reg, use_syn=True, \
                                use_full_iters=False)
 
-        fixed_data_env.save()
-        moving_data_env.save()
+        reference_data_env.save()
+        target_data_env.save()
     else:
-        print "Head of the fixed data is already registered to the head of moving one"
+        print "Head of the reference data is already registered to the head of target one"
 
-    print "--Transfrom labels of known fish's head into the unknown's one..."
-    # Transforming labels of head of fixed fish to the head of moving one
-    wokring_env_htr = moving_data_env
-    ref_image_path_htr = head_data_part_moving_niigz_path
+    print "--Transfrom labels of reference fish's head into the target's one..."
+    # Transforming labels of head of reference fish to the head of target one
+    wokring_env_htr = target_data_env
+    ref_image_path_htr = head_data_part_target_niigz_path
     print ref_image_path_htr
     transformation_path_htr = ants_head_reg_paths['gen_affine']
     def_transformation_path_htr = ants_head_reg_paths['warp']
-    labels_image_path_htr = head_data_part_labels_fixed_niigz_path
+    labels_image_path_htr = head_data_part_labels_reference_niigz_path
     test_data_htr = open_data(ref_image_path_htr)
-    transformation_output_htr = moving_data_env.get_new_volume_niigz_path(test_data_htr.shape, 'zoomed_0p5_head_brain_labels', bits=8)
+    transformation_output_htr = target_data_env.get_new_volume_niigz_path(test_data_htr.shape, 'zoomed_0p5_head_brain_labels', bits=8)
     reg_prefix_htr = 'head_label_deforming'
 
     if not os.path.exists(transformation_output_htr):
@@ -2613,57 +2663,57 @@ def brain_segmentation_ants(fixed_data_env, moving_data_env):
                              transformation_output_htr, \
                              def_transformation_path=def_transformation_path_htr, \
                              reg_prefix=reg_prefix_htr)
-        fixed_data_env.save()
-        moving_data_env.save()
+        reference_data_env.save()
+        target_data_env.save()
     else:
         print "Head data is already transformed"
 
-    print "--Extract the unknown fish's brain using transformed head labels..."
-    # Extract moving brain volume
-    head_brain_label_moving = open_data(transformation_output_htr)
-    head_brain_data_moving = open_data(ref_image_path_htr)
-    brain_data_volume_moving, brain_data_volume_moving_bbox = extract_largest_volume_by_label(head_brain_data_moving, head_brain_label_moving, bb_side_offset=10)
-    brain_data_volume_moving_niigz_path = moving_data_env.get_new_volume_niigz_path(brain_data_volume_moving.shape, 'zoomed_0p5_head_extracted_brain')
+    print "--Extract the target fish's brain using transformed head labels..."
+    # Extract target brain volume
+    head_brain_label_target = open_data(transformation_output_htr)
+    head_brain_data_target = open_data(ref_image_path_htr)
+    brain_data_volume_target, brain_data_volume_target_bbox = extract_largest_volume_by_label(head_brain_data_target, head_brain_label_target, bb_side_offset=10)
+    brain_data_volume_target_niigz_path = target_data_env.get_new_volume_niigz_path(brain_data_volume_target.shape, 'zoomed_0p5_head_extracted_brain')
 
-    print brain_data_volume_moving_niigz_path
+    print brain_data_volume_target_niigz_path
 
-    if not os.path.exists(brain_data_volume_moving_niigz_path):
-        save_as_nifti(brain_data_volume_moving, brain_data_volume_moving_niigz_path)
+    if not os.path.exists(brain_data_volume_target_niigz_path):
+        save_as_nifti(brain_data_volume_target, brain_data_volume_target_niigz_path)
 
-    print "--Extract the known fish's head using labels..."
-    # Extract fixed brain volume
-    head_brain_label_fixed = open_data(labels_image_path_htr)
-    head_brain_data_fixed = open_data(moving_image_path_head_reg)
-    brain_data_volume_fixed, brain_fixed_bbox = extract_largest_volume_by_label(head_brain_data_fixed, head_brain_label_fixed, bb_side_offset=10)
-    brain_data_labels_volume_fixed = head_brain_label_fixed[brain_fixed_bbox]
+    print "--Extract the reference fish's head using labels..."
+    # Extract reference brain volume
+    head_brain_label_reference = open_data(labels_image_path_htr)
+    head_brain_data_reference = open_data(target_image_path_head_reg)
+    brain_data_volume_reference, brain_reference_bbox = extract_largest_volume_by_label(head_brain_data_reference, head_brain_label_reference, bb_side_offset=10)
+    brain_data_labels_volume_reference = head_brain_label_reference[brain_reference_bbox]
 
-    brain_data_volume_fixed_niigz_path = fixed_data_env.get_new_volume_niigz_path(brain_data_volume_fixed.shape, 'zoomed_0p5_head_extracted_brain')
-    brain_data_labels_volume_fixed_niigz_path = fixed_data_env.get_new_volume_niigz_path(brain_data_labels_volume_fixed.shape, 'zoomed_0p5_head_extracted_brain_labels')
+    brain_data_volume_reference_niigz_path = reference_data_env.get_new_volume_niigz_path(brain_data_volume_reference.shape, 'zoomed_0p5_head_extracted_brain')
+    brain_data_labels_volume_reference_niigz_path = reference_data_env.get_new_volume_niigz_path(brain_data_labels_volume_reference.shape, 'zoomed_0p5_head_extracted_brain_labels')
 
-    print brain_data_volume_fixed_niigz_path
-    print brain_data_labels_volume_fixed_niigz_path
+    print brain_data_volume_reference_niigz_path
+    print brain_data_labels_volume_reference_niigz_path
 
-    if not os.path.exists(brain_data_volume_fixed_niigz_path):
-        save_as_nifti(brain_data_volume_fixed, brain_data_volume_fixed_niigz_path)
+    if not os.path.exists(brain_data_volume_reference_niigz_path):
+        save_as_nifti(brain_data_volume_reference, brain_data_volume_reference_niigz_path)
 
-    if not os.path.exists(brain_data_labels_volume_fixed_niigz_path):
-        save_as_nifti(brain_data_labels_volume_fixed, brain_data_labels_volume_fixed_niigz_path)
+    if not os.path.exists(brain_data_labels_volume_reference_niigz_path):
+        save_as_nifti(brain_data_labels_volume_reference, brain_data_labels_volume_reference_niigz_path)
 
-    print "--Register the known fish's brain to the unknown's one..."
-    # Register the fixed brain to the moving one
+    print "--Register the reference fish's brain to the target's one..."
+    # Register the reference brain to the target one
     ants_prefix_head_brain_reg = 'head_brain_registration'
-    ants_head_brain_reg_paths = fixed_data_env.get_aligned_data_paths(ants_prefix_head_brain_reg)
-    working_env_head_brain_reg = fixed_data_env
-    fixed_image_path_head_brain_reg = brain_data_volume_moving_niigz_path
-    moving_image_path_head_brain_reg = brain_data_volume_fixed_niigz_path
+    ants_head_brain_reg_paths = reference_data_env.get_aligned_data_paths(ants_prefix_head_brain_reg)
+    working_env_head_brain_reg = reference_data_env
+    reference_image_path_head_brain_reg = brain_data_volume_target_niigz_path
+    target_image_path_head_brain_reg = brain_data_volume_reference_niigz_path
     output_name_head_brain_reg = ants_head_brain_reg_paths['out_name']
     warped_path_head_brain_reg = ants_head_brain_reg_paths['warped']
     iwarped_path_head_brain_reg = ants_head_brain_reg_paths['iwarp']
 
     if not os.path.exists(warped_path_head_brain_reg):
         align_fish_simple_ants(working_env_head_brain_reg, \
-                               fixed_image_path_head_brain_reg, \
-                               moving_image_path_head_brain_reg, \
+                               reference_image_path_head_brain_reg, \
+                               target_image_path_head_brain_reg, \
                                output_name_head_brain_reg, \
                                warped_path_head_brain_reg, \
                                iwarped_path_head_brain_reg, \
@@ -2671,20 +2721,20 @@ def brain_segmentation_ants(fixed_data_env, moving_data_env):
                                use_syn=True, \
                                use_full_iters=True)
 
-        fixed_data_env.save()
-        moving_data_env.save()
+        reference_data_env.save()
+        target_data_env.save()
     else:
-        print "The brain of the head of the fixed data is already registered to the brain of the head of moving one"
+        print "The brain of the head of the reference data is already registered to the brain of the head of target one"
 
 
-    print "--Transform the known fish's brain labels into the unknown's one..."
-    # Transforming labels of the brain of head of fixed fish to the brain of the head of moving one
-    wokring_env_brain_tr = moving_data_env
-    ref_image_path_brain_tr = brain_data_volume_moving_niigz_path
+    print "--Transform the reference fish's brain labels into the target's one..."
+    # Transforming labels of the brain of head of reference fish to the brain of the head of target one
+    wokring_env_brain_tr = target_data_env
+    ref_image_path_brain_tr = brain_data_volume_target_niigz_path
     transformation_path_brain_tr = ants_head_brain_reg_paths['gen_affine']
-    labels_image_path_brain_tr = brain_data_labels_volume_fixed_niigz_path
+    labels_image_path_brain_tr = brain_data_labels_volume_reference_niigz_path
     test_data_brain_tr = open_data(ref_image_path_brain_tr)
-    transformation_output_brain_tr = moving_data_env.get_new_volume_niigz_path(test_data_brain_tr.shape, 'zoomed_0p5_head_extracted_brain_labels', bits=8)
+    transformation_output_brain_tr = target_data_env.get_new_volume_niigz_path(test_data_brain_tr.shape, 'zoomed_0p5_head_extracted_brain_labels', bits=8)
     reg_prefix_brain_tr = 'head_brain_label_deforming'
     def_transformation_path_brain_tr = ants_head_brain_reg_paths['warp']
 
@@ -2696,32 +2746,32 @@ def brain_segmentation_ants(fixed_data_env, moving_data_env):
                              reg_prefix=reg_prefix_brain_tr)
 
 
-        fixed_data_env.save()
-        moving_data_env.save()
+        reference_data_env.save()
+        target_data_env.save()
     else:
-        print "The brain of the fixed head data is already transformed"
+        print "The brain of the reference head data is already transformed"
 
-    print "--Complete the unknown fish's brain labels to full volume..."
-    test_data_complete_vol_brain_moving = open_data(warped_path_prealign)
-    complete_vol_unknown_brain_labels_niigz_path = moving_data_env.get_new_volume_niigz_path(test_data_complete_vol_brain_moving.shape, 'zoomed_0p5_complete_volume_brain_labels', bits=8)
+    print "--Complete the target fish's brain labels to full volume..."
+    test_data_complete_vol_brain_target = open_data(warped_path_prealign)
+    complete_vol_target_brain_labels_niigz_path = target_data_env.get_new_volume_niigz_path(test_data_complete_vol_brain_target.shape, 'zoomed_0p5_complete_volume_brain_labels', bits=8)
 
-    if not os.path.exists(complete_vol_unknown_brain_labels_niigz_path):
-        complete_vol_unknown_brain_labels = complete_brain_to_full_volume(abdomen_data_part_labels_moving_niigz_path, \
-                                                                         head_data_part_labels_moving_niigz_path, \
+    if not os.path.exists(complete_vol_target_brain_labels_niigz_path):
+        complete_vol_target_brain_labels = complete_brain_to_full_volume(abdomen_data_part_labels_target_niigz_path, \
+                                                                         head_data_part_labels_target_niigz_path, \
                                                                          transformation_output_brain_tr, \
-                                                                         brain_data_volume_moving_bbox, \
+                                                                         brain_data_volume_target_bbox, \
                                                                          separation_overlap=20);
-        save_as_nifti(complete_vol_unknown_brain_labels, complete_vol_unknown_brain_labels_niigz_path)
+        save_as_nifti(complete_vol_target_brain_labels, complete_vol_target_brain_labels_niigz_path)
     else:
-        print "The brain labels of the moving data (unknown fish) is already transformed."
+        print "The brain labels of the target data (target fish) is already transformed."
 
-    print "--Inverse transfrom the completed unknown fish's brain labels to the initial alignment..."
-    wokring_env_brain_labels_inverse_tr = moving_data_env
-    ref_image_space_path_brain_labels_inverse_tr = moving_image_path_prealign
+    print "--Inverse transfrom the completed target fish's brain labels to the initial alignment..."
+    wokring_env_brain_labels_inverse_tr = target_data_env
+    ref_image_space_path_brain_labels_inverse_tr = target_image_path_prealign
     affine_transformation_path_brain_labels_inverse_tr = ants_prealign_paths['gen_affine']
-    labels_image_path_brain_inverse_tr = complete_vol_unknown_brain_labels_niigz_path
+    labels_image_path_brain_inverse_tr = complete_vol_target_brain_labels_niigz_path
     test_data_brain_inverse_tr = open_data(ref_image_space_path_brain_labels_inverse_tr)
-    transformation_output_brain_labels_inverse_tr = moving_data_env.get_new_volume_niigz_path(test_data_brain_inverse_tr.shape, 'zoomed_0p5_complete_volume_brain_labels_initial_alignment', bits=8)
+    transformation_output_brain_labels_inverse_tr = target_data_env.get_new_volume_niigz_path(test_data_brain_inverse_tr.shape, 'zoomed_0p5_complete_volume_brain_labels_initial_alignment', bits=8)
     reg_prefix_brain_labels_inverse_tr = 'complete_volume_brain_labels_deforming_to_initial_alignment'
 
     if not os.path.exists(transformation_output_brain_labels_inverse_tr):
@@ -2732,27 +2782,27 @@ def brain_segmentation_ants(fixed_data_env, moving_data_env):
                                      transformation_output_brain_labels_inverse_tr, \
                                      reg_prefix=reg_prefix_brain_labels_inverse_tr)
 
-        fixed_data_env.save()
-        moving_data_env.save()
+        reference_data_env.save()
+        target_data_env.save()
     else:
-        print "The completed unknown fish's brain labels is already transformed to the initial alignment."
+        print "The completed target fish's brain labels is already transformed to the initial alignment."
 
-    print "--Upscale the initial aligned completed unknown fish's brain labels to the input volume size..."
+    print "--Upscale the initial aligned completed target fish's brain labels to the input volume size..."
     scaled_initally_aligned_data_brain_labels_path = transformation_output_brain_labels_inverse_tr
-    target_orignal_data_fish_path = moving_data_env.get_input_path()
-    upscaled_initially_aligned_complete_vol_unknown_brain_labels_niigz_path = moving_data_env.get_new_volume_niigz_path(test_data_complete_vol_brain_moving.shape, 'complete_volume_brain_labels_initial_alignment', bits=8)
-    zoomed_volume_bbox = moving_data_env.get_zoomed_effective_volume_bbox()
+    target_orignal_data_fish_path = target_data_env.get_input_path()
+    upscaled_initially_aligned_complete_vol_target_brain_labels_niigz_path = target_data_env.get_new_volume_niigz_path(test_data_complete_vol_brain_target.shape, 'complete_volume_brain_labels_initial_alignment', bits=8)
+    zoomed_volume_bbox = target_data_env.get_zoomed_effective_volume_bbox()
 
-    if not os.path.exists(upscaled_initially_aligned_complete_vol_unknown_brain_labels_niigz_path):
+    if not os.path.exists(upscaled_initially_aligned_complete_vol_target_brain_labels_niigz_path):
         upscaled_initally_aligned_data_brain_labels = scale_to_size(target_orignal_data_fish_path, \
                                                                     scaled_initally_aligned_data_brain_labels_path, \
                                                                     zoomed_volume_bbox, \
                                                                     scale=2.0, \
                                                                     order=0)
         save_as_nifti(upscaled_initally_aligned_data_brain_labels, \
-                      upscaled_initially_aligned_complete_vol_unknown_brain_labels_niigz_path)
+                      upscaled_initially_aligned_complete_vol_target_brain_labels_niigz_path)
     else:
-        print "The initially aligned completed unknown fish's brain labels is already upscaled to the input volume size."
+        print "The initially aligned completed target fish's brain labels is already upscaled to the input volume size."
 
 
 def scale_to_size_old(target_data_path, extracted_scaled_data_path, extracted_data_bbox, scale=2.0, order=0):

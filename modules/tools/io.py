@@ -4,6 +4,15 @@ import numpy as np
 import fabio as fb
 import nibabel as nib
 
+INPUT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir, os.path.pardir, os.path.pardir, 'MedakaRawData'))
+OUTPUT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir, os.path.pardir, os.path.pardir, 'AFS-output'))
+LSDF_DIR = '/mnt/LSDF' if os.name == 'posix' else "Z:\\"
+ANTS_SCRIPTS_PATH_FMT = os.path.abspath(os.path.join(os.path.dirname(__file__), \
+                                        os.path.pardir, \
+                                        os.path.pardir, \
+                                        os.path.pardir, \
+                                        'ANTs_Scripts' if os.name == 'posix' else 'ANTs'))
+
 def open_data(filepath):
     _, glob_ext = os.path.splitext(os.path.basename(filepath))
     data = None
@@ -87,6 +96,9 @@ def check_files(working_dir, key_word):
     return False
 
 def get_path_by_name(fish_number, input_dir, isFindLabels=False):
+    if not os.path.exists(input_dir):
+        os.makedirs(input_dir)
+
     for fname in os.listdir(input_dir):
         path = os.path.join(input_dir, fname)
         if os.path.isfile(path):
