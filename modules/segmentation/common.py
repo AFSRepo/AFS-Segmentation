@@ -28,8 +28,8 @@ def initialize_env(data_env):
 
     if not data_env.is_entry_exists(phase_name):
         if data_env.get_input_path():
-            aligned_data, aligned_data_label = get_aligned_fish(fish_num, zoom_level=2)
-            zoomed_aligned_data, zoomed_aligned_data_label = get_aligned_fish(fish_num, zoom_level=4)
+            aligned_data, aligned_data_label = get_aligned_fish(data_env.fish_num, zoom_level=2)
+            zoomed_aligned_data, zoomed_aligned_data_label = get_aligned_fish(data_env.fish_num, zoom_level=4)
 
             ext_volume_niigz_path = data_env.get_new_volume_niigz_path(aligned_data.shape, 'extracted')
             zoomed_ext_volume_niigz_path = data_env.get_new_volume_niigz_path(zoomed_aligned_data.shape, 'zoomed_0p5_extracted')

@@ -8,7 +8,7 @@ class NoneDict(dict):
         return dict.get(self, key, '')
 
 class DataEnvironment(object):
-    def __init__(self, project_path, input_filepath):
+    def __init__(self, project_path, input_filepath, fish_num):
         self.envs = NoneDict()
         self.envs['project_path'] = project_path
 
@@ -19,7 +19,7 @@ class DataEnvironment(object):
         self.envs['target_data_path'] = None
         self.envs['input_data_labels_path'] = None
         self.envs['input_data_spine_labels_path'] = None
-        
+
         self.envs['filename_ext'] = os.path.basename(input_filepath)
         self.envs['filename_no_ext'] = os.path.splitext(os.path.basename(input_filepath))[0]
 
@@ -39,6 +39,7 @@ class DataEnvironment(object):
         self.invAffineMatrix = '%sInvAffineMatrix.txt'
 
         self.ANTSPATH = "/home/rshkarin/ANKA_work/antsbin/bin"
+        self.fish_num = fish_num
 
     def save(self):
         w = csv.writer(open(self._get_cache_path(), "w"))
@@ -245,16 +246,3 @@ class DataEnvironment(object):
                             '%s_statistics_%s.csv' % (prefix, name))
 
         return self.envs['input_data_%s_statistics' % prefix]
-
-    def test_paths(self):
-        self.set_target_data_path("C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish204\\fish204_32bit_621x621x1800.raw")
-        print self.get_working_path()
-        print self.get_input_path()
-        print self.get_target_path()
-        print self.get_new_volume_niigz_path((320,320,1000), 'extracted_zoomed_0p5')
-        print self.get_new_volume_path((1000,320,320), 'extracted_zoomed_0p5')
-        print self.get_new_volume_labels_niigz_path((320,320,1000), 'extracted')
-        print self.get_new_volume_labels_path((1000,320,320), 'extracted')
-        print self.get_head_abdomen_volume_paths((300,300,300), (500,500,500))
-        print self.get_aligned_data_paths("FISH_SEPARATION")
-        print self.get_statistic_path("eyes")

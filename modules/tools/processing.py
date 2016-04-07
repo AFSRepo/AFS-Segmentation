@@ -864,11 +864,14 @@ def zoom_rotate(input_path, output_path, rotate_angle=0, rot_axis='z', in_folder
 
     t.elapsed('Zoom and rotation: %s' % input_path)
 
-def _get_fish_folder(fish_num, zoom_level=2):
+def get_fish_folder(fish_num, zoom_level=2):
     return os.path.join(INPUT_DIR, 'fish%d' % fish_num, '@%d' % zoom_level)
 
 def _get_aligned_fish_folder(fish_num, zoom_level=2):
     return os.path.join(OUTPUT_DIR, 'Aligned', 'fish%d' % fish_num, '@%d' % zoom_level)
+
+def get_fish_project_folder(fish_num):
+    return os.path.join(OUTPUT_DIR, 'Segmentation', 'fish%d' % fish_num)
 
 def get_fish_path(fish_num, zoom_level=2, isLabel=False):
     req_path = get_path_by_name(fish_num, os.path.join(INPUT_DIR, 'fish%d' % fish_num, '@%d' % zoom_level), isFindLabels=isLabel)

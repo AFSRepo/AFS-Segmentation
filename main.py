@@ -8,7 +8,8 @@ from modules.tools.io import INPUT_DIR, OUTPUT_DIR, LSDF_DIR
 from modules.tools.processing import binarizator, align_fish_by_eyes_tail
 from modules.tools.processing import convert_fish, convert_fish_in_parallel, zoom_chunk_fishes, zoom_in_parallel
 from modules.tools.processing import align_fishes, zoom_fishes, zoom_rotate, downsample_data
-from modules.tools.processing import scaling_aligning, produce_aligned_fish, get_aligned_fish
+from modules.tools.processing import scaling_aligning, produce_aligned_fish, get_aligned_fish, get_fish_folder
+from modules.tools.processing import get_fish_project_folder, get_fish_path
 from modules.tools.misc import Timer
 from modules.tools.morphology import object_counter, gather_statistics, extract_largest_area_data
 from modules.segmentation.eyes import eyes_statistics, eyes_zrange
@@ -28,8 +29,9 @@ import shutil
 class FishDataEnv:
     def __init__(self, reference_project_path, reference_input_path, \
             reference_input_labels_path, target_project_path, target_input_path, \
-            target_fish_num):
-        self.fish_num = target_fish_num
+            reference_fish_num, target_fish_num):
+        self.target_fish_num = target_fish_num
+        self.reference_fish_num = reference_fish_num
 
         self.target_project_path = target_project_path
         self.target_input_path = target_input_path
@@ -37,8 +39,8 @@ class FishDataEnv:
         self.reference_project_path = reference_project_path
         self.reference_input_path = reference_input_path
 
-        self.target_data_env = DataEnvironment(target_project_path, target_input_path)
-        self.reference_data_env = DataEnvironment(reference_project_path, reference_input_path)
+        self.target_data_env = DataEnvironment(target_project_path, target_input_path, target_fish_num)
+        self.reference_data_env = DataEnvironment(reference_project_path, reference_input_path, reference_fish_num)
 
         self.reference_data_env.set_input_labels_path(reference_input_labels_path)
         self.reference_data_env.set_target_data_path(target_input_path)
@@ -56,16 +58,17 @@ class FishDataEnv:
         return text
 
 def _build_fish_env(reference_fish_num, target_fish_num):
-    return FishDataEnv(os.path.join(OUTPUT_DIR, 'fish%d' % reference_fish_num),\
-                       get_path_by_name(reference_fish_num, os.path.join(INPUT_DIR, 'fish%d' % reference_fish_num)),\
-                       get_path_by_name(reference_fish_num, os.path.join(INPUT_DIR, 'fish%d' % reference_fish_num), isFindLabels=True),\
-                       os.path.join(OUTPUT_DIR, 'fish%d' % target_fish_num),\
-                       get_path_by_name(target_fish_num, os.path.join(INPUT_DIR, 'fish%d' % target_fish_num)),\
+    return FishDataEnv(get_fish_project_folder(reference_fish_num),\
+                       get_fish_path(reference_fish_num),\
+                       get_fish_path(reference_fish_num, isLabel=True),\
+                       get_fish_project_folder(target_fish_num),\
+                       get_fish_path(target_fish_num),\
+                       reference_fish_num, \
                        target_fish_num)
 
 def _build_fish_data_paths():
     data = []
-    data.append(*_build_fish_env(202, 204))
+    data.append(_build_fish_env(202, 204))
     return data
 
 def clean_version_run_brain_segmentation_unix(useAnts=True):
@@ -73,7 +76,8 @@ def clean_version_run_brain_segmentation_unix(useAnts=True):
 
     print 'PEW PEW PEW FIST LAUNCH OF AUTO-BRAIN SEGMENTATION!'
     for fish_env in fishes_envs:
-        print '############################# Fish %d ###################################' % fish_env.fish_num
+        print '############################# Fish %d -> Fish %d ###################################' % \
+                                (fish_env.reference_fish_num, fish_env.target_fish_num)
         print fish_env
 
         if useAnts:
@@ -83,7 +87,7 @@ def clean_version_run_brain_segmentation_unix(useAnts=True):
 
 if __name__ == "__main__":
     #run_spine_segmentation("C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish204\\fish204_aligned_32bit_60x207x1220.raw")
-    #clean_version_run_brain_segmentation_unix()
-    input_aligned_data, input_aligned_data_label = get_aligned_fish(204, zoom_level=8, min_zoom_level=4)
+    clean_version_run_brain_segmentation_unix()
+    #input_aligned_data, input_aligned_data_label = get_aligned_fish(204, zoom_level=8, min_zoom_level=4)
     #output = get_aligned_fish(204, zoom_level=8, min_zoom_level=4)
     #print str(output)
