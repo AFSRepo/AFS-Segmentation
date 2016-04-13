@@ -463,6 +463,12 @@ def align_eyes_centroids(data, data_label=None, eyes_stats=None):
 
 def align_tail_part(input_data, input_data_label=None, landmark_tail_idx_frac=0.56383, spinal_angle=0.12347, interp_order=3, bb_side_offset=20):
     print 'Aligning of tail part - Extracting z-bounded data...'
+    data_type = input_data.dtype
+
+    data_label_type = None
+    if input_data_label is not None:
+        data_label_type = input_data_label.dtype
+
     binarized_stack, bbox, eyes_stats = binarizator(input_data)
     binary_stack_stats, thresholded_data = object_counter(binarized_stack)
     largest_volume_region, _, _ = \
@@ -557,6 +563,11 @@ def align_tail_part(input_data, input_data_label=None, landmark_tail_idx_frac=0.
                                                   force_positiveness=False)
 
         del data_label_rotated
+
+    largest_data_rotated_region = largest_data_rotated_region.astype(data_type)
+
+    if largest_data_label_rotated_region is not None:
+        largest_data_label_rotated_region = largest_data_label_rotated_region.astype(data_label_type)
 
     return largest_data_rotated_region, largest_data_label_rotated_region, extration_bbox
 
@@ -867,7 +878,7 @@ def zoom_rotate(input_path, output_path, rotate_angle=0, rot_axis='z', in_folder
 def get_fish_folder(fish_num, zoom_level=2):
     return os.path.join(INPUT_DIR, 'fish%d' % fish_num, '@%d' % zoom_level)
 
-def _get_aligned_fish_folder(fish_num, zoom_level=2):
+def get_aligned_fish_folder(fish_num, zoom_level=2):
     return os.path.join(OUTPUT_DIR, 'Aligned', 'fish%d' % fish_num, '@%d' % zoom_level)
 
 def get_fish_project_folder(fish_num):
@@ -881,11 +892,11 @@ def get_fish_path(fish_num, zoom_level=2, isLabel=False):
 
         for zl in [i for i in [1,2,4,8] if i < zoom_level]: #[1,2,4,8] - zoom levels
             prev_zoom_level_data_path = get_path_by_name(fish_num, \
-                                                  _get_fish_folder(fish_num, zoom_level=zl), \
+                                                  get_fish_folder(fish_num, zoom_level=zl), \
                                                   isFindLabels=isLabel)
             if prev_zoom_level_data_path is not None:
                 downsampled_data_path = downsample_data(prev_zoom_level_data_path, \
-                                                        _get_fish_folder(fish_num, zoom_level=zoom_level), \
+                                                        get_fish_folder(fish_num, zoom_level=zoom_level), \
                                                         zoom_in_level=zoom_level/zl, \
                                                         order=0 if isLabel else 3)
                 break
@@ -899,9 +910,9 @@ def get_fish_path(fish_num, zoom_level=2, isLabel=False):
 
 def get_aligned_fish_paths(fish_num, zoom_level=2, min_zoom_level=2):
     data_req_path = get_path_by_name(fish_num, \
-                                    _get_aligned_fish_folder(fish_num, zoom_level=zoom_level))
+                                    get_aligned_fish_folder(fish_num, zoom_level=zoom_level))
     data_label_req_path = get_path_by_name(fish_num, \
-                                    _get_aligned_fish_folder(fish_num, zoom_level=zoom_level), \
+                                    get_aligned_fish_folder(fish_num, zoom_level=zoom_level), \
                                     isFindLabels=True)
 
     print '###########data_req_path = %s' % data_req_path
@@ -910,12 +921,12 @@ def get_aligned_fish_paths(fish_num, zoom_level=2, min_zoom_level=2):
     if data_req_path is None:
         downsampled_data_path, downsampled_data_label_path = None, None
 
-        for zl in [i for i in [1,2,4,8] if i < zoom_level]:
+        for zl in [i for i in [1,2,4,8] if i <= zoom_level]:
             prev_zoom_level_data_path = get_path_by_name(fish_num, \
-                                                         _get_aligned_fish_folder(fish_num, zoom_level=zl))
+                                                         get_aligned_fish_folder(fish_num, zoom_level=zl))
 
             prev_zoom_level_data_label_path = get_path_by_name(fish_num, \
-                                                                _get_aligned_fish_folder(fish_num, zoom_level=zl), \
+                                                                get_aligned_fish_folder(fish_num, zoom_level=zl), \
                                                                 isFindLabels=True)
 
             print 'prev_zoom_level_data_path = %s' % prev_zoom_level_data_path
@@ -924,14 +935,14 @@ def get_aligned_fish_paths(fish_num, zoom_level=2, min_zoom_level=2):
 
             if prev_zoom_level_data_path is not None:
                 downsampled_data_path = downsample_data(prev_zoom_level_data_path, \
-                                                        _get_aligned_fish_folder(fish_num, zoom_level=zoom_level), \
+                                                        get_aligned_fish_folder(fish_num, zoom_level=zoom_level), \
                                                         zoom_in_level=zoom_level/zl, \
                                                         order=3)
                 print 'downsampled_data_path = %s' % downsampled_data_path
 
                 if prev_zoom_level_data_label_path is not None:
                     downsampled_data_label_path = downsample_data(prev_zoom_level_data_label_path, \
-                                                                  _get_aligned_fish_folder(fish_num, zoom_level=zoom_level), \
+                                                                  get_aligned_fish_folder(fish_num, zoom_level=zoom_level), \
                                                                   zoom_in_level=zoom_level/zl, \
                                                                   order=0)
                     print 'downsampled_data_label_path = %s' % downsampled_data_label_path
@@ -948,29 +959,25 @@ def get_aligned_fish_paths(fish_num, zoom_level=2, min_zoom_level=2):
 
 def get_aligned_fish_path(fish_num, zoom_level=2, isLabel=False, min_zoom_level=2):
     req_path = get_path_by_name(fish_num, \
-                                _get_aligned_fish_folder(fish_num, zoom_level=zoom_level), \
+                                get_aligned_fish_folder(fish_num, zoom_level=zoom_level), \
                                 isFindLabels=isLabel)
-    print '###########req_path = %s' % req_path
     if req_path is None:
         downsampled_data_path = None
-        for zl in [i for i in [1,2,4,8] if i < zoom_level]:
+        for zl in [i for i in [1,2,4,8] if i <= zoom_level]:
             prev_zoom_level_data_path = get_path_by_name(fish_num, \
-                                                         _get_aligned_fish_folder(fish_num, zoom_level=zl), \
+                                                         get_aligned_fish_folder(fish_num, zoom_level=zl), \
                                                          isFindLabels=isLabel)
             if prev_zoom_level_data_path is not None:
                 downsampled_data_path = downsample_data(prev_zoom_level_data_path, \
-                                                        _get_aligned_fish_folder(fish_num, zoom_level=zoom_level), \
+                                                        get_aligned_fish_folder(fish_num, zoom_level=zoom_level), \
                                                         zoom_in_level=zoom_level/zl, \
                                                         order=0 if isLabel else 3)
-                print "--------------------------------------DOWNLASMESD ( %s )!!!!!" % downsampled_data_path
                 break
 
         if downsampled_data_path is not None:
             return downsampled_data_path
         else:
-            print "--------------------------------------WOW MAN? WHYYYY?"
             produce_aligned_fish(fish_num, min_zoom_level=min_zoom_level)
-            print "--------------------------------------WOW MAN? WHYYYY? LOLLO"
             get_aligned_fish_path(fish_num, zoom_level=zoom_level, isLabel=isLabel)
     else:
         return req_path
@@ -985,6 +992,7 @@ def downsample_data(input_path, output_path, zoom_in_level=2, order=3):
 
     print 'Zooming started...'
     zoomed_data = zoom(input_data, 1./zoom_in_level, order=order)
+    print 'Normal data shape = %s, Zoomed data shape = %s' % (str(input_data.shape), str(zoomed_data.shape))
 
     name, bits, size, ext = parse_filename(input_path)
     output_file = create_filename_with_shape(input_path, zoomed_data.shape)
@@ -1014,11 +1022,11 @@ def scaling_aligning():
     align_fishes(fish_num_array, output_zoom_dir, output_align_dir)
 
 def produce_aligned_fish(fish_num, min_zoom_level=2):
+    print "--Produce aligned fish%d" % fish_num
     non_aligned_data_path, non_aligned_data_label_path = \
                     get_fish_path(fish_num, zoom_level=min_zoom_level), \
                     get_fish_path(fish_num, zoom_level=min_zoom_level, isLabel=True)
 
-    print 'non_aligned_data_path = %s' % non_aligned_data_path
     non_aligned_input_data = open_data(non_aligned_data_path)
 
     non_aligned_input_data_label = None
@@ -1033,29 +1041,37 @@ def produce_aligned_fish(fish_num, min_zoom_level=2):
     output_file = create_filename_with_shape(non_aligned_data_path, \
                                              aligned_data.shape, \
                                              prefix="aligned")
+
+    aligned_data = aligned_data.astype('float%d' % bits)
+
     output_label_file = None
     if non_aligned_data_label_path is not None:
         name_label, bits_label, size_label, ext_label = parse_filename(non_aligned_data_label_path)
         output_label_file = create_filename_with_shape(non_aligned_data_label_path, \
                                                        aligned_data_label.shape, \
                                                        prefix="aligned")
+        if bits_label != 8:
+            raise ValueError('Label data should be 8-bit.')
 
-    output_path = _get_aligned_fish_folder(fish_num, zoom_level=min_zoom_level)
+        aligned_data_label = aligned_data_label.astype('uint%d' % bits_label)
+
+    output_path = get_aligned_fish_folder(fish_num, zoom_level=min_zoom_level)
 
     if not os.path.exists(output_path):
         os.makedirs(output_path)
 
     output_data_path = os.path.join(output_path, output_file)
-    print 'aligned_data.tofile(output_data_path) = %s' % output_data_path
     aligned_data.tofile(output_data_path)
 
     if output_label_file is not None:
         output_label_path = os.path.join(output_path, output_label_file)
-        print 'aligned_data_label.tofile(output_label_path) = %s' % output_label_path
         aligned_data_label.tofile(output_label_path)
 
 def get_aligned_fish(fish_num, zoom_level=2, min_zoom_level=2):
     input_aligned_data_path, input_aligned_data_label_path = get_aligned_fish_paths(fish_num, zoom_level=zoom_level, min_zoom_level=min_zoom_level)
+
+    print 'zoom_level = %d' % zoom_level
+    print 'min_zoom_level = %d' % min_zoom_level
 
     print 'input_aligned_data_path = %s' % str(input_aligned_data_path)
     print 'input_aligned_data_label_path = %s' % str(input_aligned_data_label_path)

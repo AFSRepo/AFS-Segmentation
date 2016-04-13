@@ -14,7 +14,10 @@ from modules.tools.io import ANTS_SCRIPTS_PATH_FMT
 #ANTs - 0 , NiftyReg - 1
 REG_TOOL = 1
 
-def initialize_env(data_env):
+def initialize_env(data_env, zoom_level=2, min_zoom_level=2):
+    print '--Aligning fish%d' % data_env.fish_num
+
+    t = Timer()
     phase_name = 'extracted_input_data_path_niigz'
     phase_name_zoomed = 'zoomed_0p5_extracted_input_data_path_niigz'
 
@@ -28,14 +31,24 @@ def initialize_env(data_env):
 
     if not data_env.is_entry_exists(phase_name):
         if data_env.get_input_path():
-            aligned_data, aligned_data_label = get_aligned_fish(data_env.fish_num, zoom_level=2)
-            zoomed_aligned_data, zoomed_aligned_data_label = get_aligned_fish(data_env.fish_num, zoom_level=4)
+            #aligned_data, aligned_data_label = get_aligned_fish(data_env.fish_num, zoom_level=2)
+            #zoomed_aligned_data, zoomed_aligned_data_label = get_aligned_fish(data_env.fish_num, zoom_level=4)zoom_level=2, min_zoom_level=2
+
+            #aligned_data, aligned_data_label = np.zeros((1,1), dtype=np.float32), np.zeros((1,1), dtype=np.float32)
+            aligned_data, aligned_data_label = get_aligned_fish(data_env.fish_num, zoom_level=zoom_level, min_zoom_level=min_zoom_level)
+            zoomed_aligned_data, zoomed_aligned_data_label = get_aligned_fish(data_env.fish_num, zoom_level=zoom_level*2, min_zoom_level=min_zoom_level)
 
             ext_volume_niigz_path = data_env.get_new_volume_niigz_path(aligned_data.shape, 'extracted')
             zoomed_ext_volume_niigz_path = data_env.get_new_volume_niigz_path(zoomed_aligned_data.shape, 'zoomed_0p5_extracted')
 
+            ext_volume_path = data_env.get_new_volume_path(aligned_data.shape, 'extracted')
+            zoomed_ext_volume_path = data_env.get_new_volume_path(zoomed_aligned_data.shape, 'zoomed_0p5_extracted')
+
             save_as_nifti(aligned_data, ext_volume_niigz_path)
             save_as_nifti(zoomed_aligned_data, zoomed_ext_volume_niigz_path)
+
+            aligned_data.tofile(ext_volume_path)
+            zoomed_aligned_data.tofile(zoomed_ext_volume_path)
 
             data_shape = aligned_data.shape
             zoomed_data_shape = zoomed_aligned_data.shape
@@ -45,13 +58,20 @@ def initialize_env(data_env):
 
             data_env.set_effective_volume_bbox(data_bbox)
             data_env.set_zoomed_effective_volume_bbox(zoomed_data_bbox)
+            data_env.set_input_align_data_path(ext_volume_path)
 
             if data_env.get_input_labels_path():
                 ext_volume_labels_niigz_path = data_env.get_new_volume_labels_niigz_path(aligned_data_label.shape, 'extracted')
                 zoomed_ext_volume_labels_niigz_path = data_env.get_new_volume_labels_niigz_path(zoomed_aligned_data_label.shape, 'zoomed_0p5_extracted')
 
+                ext_volume_labels_path = data_env.get_new_volume_labels_path(aligned_data_label.shape, 'extracted')
+                zoomed_ext_volume_labels_path = data_env.get_new_volume_labels_path(zoomed_aligned_data_label.shape, 'zoomed_0p5_extracted')
+
                 save_as_nifti(aligned_data_label, ext_volume_labels_niigz_path)
                 save_as_nifti(zoomed_aligned_data_label, zoomed_ext_volume_labels_niigz_path)
+
+                aligned_data_label.tofile(ext_volume_labels_path)
+                zoomed_aligned_data_label.tofile(zoomed_ext_volume_labels_path)
 
                 print "Abdomen and brain labels are written and zoomed"
         else:
@@ -2447,8 +2467,8 @@ def brain_segmentation_ants(reference_data_env, target_data_env):
 
     # Crop the raw data
     print "--Aligning and volumes' extraction"
-    reference_data_results = initialize_env(reference_data_env)
-    moving_data_results = initialize_env(target_data_env)
+    reference_data_results = initialize_env(reference_data_env, zoom_level=2, min_zoom_level=2)
+    moving_data_results = initialize_env(target_data_env, zoom_level=2, min_zoom_level=2)
 
     reference_data_env.save()
     target_data_env.save()
@@ -2469,6 +2489,9 @@ def brain_segmentation_ants(reference_data_env, target_data_env):
     output_name_prealign = ants_prealign_names['out_name']
     warped_path_prealign = ants_prealign_paths['warped']
     iwarped_path_prealign = ants_prealign_paths['iwarp']
+
+    print 'reference_image_path_prealign = %s' % reference_image_path_prealign
+    print 'target_image_path_prealign = %s' % target_image_path_prealign
 
     if not os.path.exists(warped_path_prealign):
         align_fish_simple_ants(working_env_prealign, reference_image_path_prealign,\
@@ -2511,6 +2534,10 @@ def brain_segmentation_ants(reference_data_env, target_data_env):
     def_transformation_path_tr = ants_separation_paths['warp']
     labels_image_path_tr = reference_data_env.envs['zoomed_0p5_extracted_input_data_labels_path_niigz']
 
+    print labels_image_path_tr
+    print reference_image_path_prealign_raw
+
+
     __, __, new_size, __ = parse_filename(reference_image_path_prealign_raw)
 
     transformation_output_tr = target_data_env.get_new_volume_niigz_path(new_size, 'zoomed_0p5_extracted_labels', bits=8)
@@ -2542,6 +2569,8 @@ def brain_segmentation_ants(reference_data_env, target_data_env):
 
         aligned_data_reference = open_data(reference_image_path_prealign)
         aligned_data_labels_reference = open_data(labels_image_path_tr)
+
+        print 'labels_image_path_tr = %s' % labels_image_path_tr
 
         separation_pos_reference, abdomen_label_reference_full, head_label_reference_full = find_separation_pos(aligned_data_labels_reference)
 
@@ -2789,14 +2818,18 @@ def brain_segmentation_ants(reference_data_env, target_data_env):
 
     print "--Upscale the initial aligned completed target fish's brain labels to the input volume size..."
     scaled_initally_aligned_data_brain_labels_path = transformation_output_brain_labels_inverse_tr
-    target_orignal_data_fish_path = target_data_env.get_input_path()
     upscaled_initially_aligned_complete_vol_target_brain_labels_niigz_path = target_data_env.get_new_volume_niigz_path(test_data_complete_vol_brain_target.shape, 'complete_volume_brain_labels_initial_alignment', bits=8)
-    zoomed_volume_bbox = target_data_env.get_zoomed_effective_volume_bbox()
+    # zoomed_volume_bbox = target_data_env.get_zoomed_effective_volume_bbox()
+    original_aligned_data_path = target_data_env.get_input_align_data_path()
 
     if not os.path.exists(upscaled_initially_aligned_complete_vol_target_brain_labels_niigz_path):
-        upscaled_initally_aligned_data_brain_labels = scale_to_size(target_orignal_data_fish_path, \
+        # upscaled_initally_aligned_data_brain_labels = scale_to_size(original_aligned_data_path, \
+        #                                                             scaled_initally_aligned_data_brain_labels_path, \
+        #                                                             zoomed_volume_bbox, \
+        #                                                             scale=2.0, \
+        #                                                             order=0)
+        upscaled_initally_aligned_data_brain_labels = scale_to_size(original_aligned_data_path, \
                                                                     scaled_initally_aligned_data_brain_labels_path, \
-                                                                    zoomed_volume_bbox, \
                                                                     scale=2.0, \
                                                                     order=0)
         save_as_nifti(upscaled_initally_aligned_data_brain_labels, \
@@ -2834,17 +2867,63 @@ def scale_to_size_old(target_data_path, extracted_scaled_data_path, extracted_da
 
     return rescaled_data
 
-def scale_to_size(target_data_path, extracted_scaled_data_path, \
+def scale_to_size_old2(target_data_path, extracted_scaled_data_path, \
                   extracted_scaled_data_bbox, scale=2.0, order=0):
     target_data = open_data(target_data_path)
     extracted_scaled_data = open_data(extracted_scaled_data_path)
 
+    print 'scale_to_size (scale) = %f' % scale
+    print 'scale_to_size (extracted_scaled_data_bbox) = %s' % str(extracted_scaled_data_bbox)
+
     rescaled_extracted_data = zoom(extracted_scaled_data, scale, order=order)
     rescaled_extracted_bbox = _zoom_bbox(extracted_scaled_data_bbox, scale)
 
+    print 'scale_to_size (rescaled_extracted_bbox) = %s' % str(rescaled_extracted_bbox)
+    print 'scale_to_size (extracted_scaled_data.shape) = %s' % str(extracted_scaled_data.shape)
+
+    print 'scale_to_size (target_data.shape) = %s' % str(target_data.shape)
+
     complete_scaled_data = complete_volume_to_full_volume(target_data.shape, rescaled_extracted_data, rescaled_extracted_bbox)
 
+    print 'complete_scaled_data = %s' % str(complete_scaled_data.shape)
+
     return complete_scaled_data
+
+def scale_to_size_old3(original_aligned_data_path, extracted_scaled_data_path, \
+                  extracted_scaled_data_bbox, scale=2.0, order=0):
+    target_aligned_data = open_data(original_aligned_data_path)
+    extracted_scaled_data = open_data(extracted_scaled_data_path)
+
+    print 'scale_to_size (scale) = %f' % scale
+    print 'scale_to_size (extracted_scaled_data_bbox) = %s' % str(extracted_scaled_data_bbox)
+
+    rescaled_extracted_data = zoom(extracted_scaled_data, scale, order=order)
+    rescaled_extracted_bbox = _zoom_bbox(extracted_scaled_data_bbox, scale)
+
+    print 'scale_to_size (rescaled_extracted_bbox) = %s' % str(rescaled_extracted_bbox)
+    print 'scale_to_size (extracted_scaled_data.shape) = %s' % str(extracted_scaled_data.shape)
+
+    print 'scale_to_size (target_aligned_data.shape) = %s' % str(target_aligned_data.shape)
+
+    complete_scaled_data = complete_volume_to_full_volume(target_aligned_data.shape, rescaled_extracted_data, rescaled_extracted_bbox)
+
+    print 'complete_scaled_data = %s' % str(complete_scaled_data.shape)
+
+    return complete_scaled_data
+
+def scale_to_size(original_aligned_data_path, extracted_scaled_data_path, scale=2.0, order=0):
+    target_aligned_data = open_data(original_aligned_data_path)
+    extracted_scaled_data = open_data(extracted_scaled_data_path)
+
+    print 'scale_to_size (target_aligned_data.shape) = %s' % str(target_aligned_data.shape)
+    print 'scale_to_size (extracted_scaled_data.shape) = %s' % str(extracted_scaled_data.shape)
+
+    rescaled_extracted_data = zoom(extracted_scaled_data, scale, order=order)
+
+    print 'scale_to_size (SCALED rescaled_extracted_data.shape) = %s' % str(rescaled_extracted_data.shape)
+
+    return rescaled_extracted_data
+
 def complete_brain_to_full_volume(abdomed_part_path, head_part_path, extracted_brain_volume_path, extracted_brain_volume_bbox, separation_overlap=1):
     abdomed_part = open_data(abdomed_part_path)
     head_part = open_data(head_part_path)
@@ -2861,6 +2940,10 @@ def complete_brain_to_full_volume(abdomed_part_path, head_part_path, extracted_b
     return mask_full_volume
 
 def complete_volume_to_full_volume(target_data_shape, extracted_data, extracted_data_bbox):
+    print 'target_data_shape = %s' % str(target_data_shape)
+    print 'extracted_data.shape = %s' % str(extracted_data.shape)
+    print 'extracted_data_bbox = %s' % str(extracted_data_bbox)
+
     completed_data = np.zeros(shape=target_data_shape, dtype=extracted_data.dtype)
     completed_data[extracted_data_bbox] = extracted_data
 
@@ -2869,7 +2952,7 @@ def complete_volume_to_full_volume(target_data_shape, extracted_data, extracted_
 def extract_largest_volume_by_label(stack_data, stack_labels, bb_side_offset=0):
     stack_stats, _ = object_counter(stack_labels)
     print "INPUT extract_largest_volume_by_label = %s" % str(stack_data.shape)
-    largest_volume_region, bbox = extract_largest_area_data(stack_data, stack_stats, bb_side_offset)
+    largest_volume_region, bbox, _ = extract_largest_area_data(stack_data, stack_stats, bb_side_offset)
     print "BBOX extract_largest_volume_by_label = %s" % str(bbox)
 
     return largest_volume_region, bbox
@@ -3001,7 +3084,7 @@ def align_fish_simple_ants(working_env, fixed_image_path, moving_image_path, out
             app = 'antsRegistrationSyNMid.sh -d 3 -f {fixedImagePath} ' \
                     '-m {movingImagePath} -o {out_name} -n {num_threads} -t s -p f'.format(**args_fmt)
 
-    app = path_ants_scripts_fmt + app
+    app = os.path.join(path_ants_scripts_fmt, app)
     print app
     process = subpr.Popen(app, cwd=working_path, shell=True)
     streamdata = process.communicate()[0]
@@ -3181,10 +3264,11 @@ def split_fish(stack_data, stack_labels):
     return abdomen_data_part, head_data_part
 
 def _zoom_bbox(bbox, scale):
-    return tuple([slice(int(round(v.start * scale)), \
-                        int(round(v.stop * scale)), \
-                        int(round(v.step * scale)) if v.step else None) \
+    return tuple([slice(int(round(0 if v.start is None else v.start * scale)), \
+                        int(round(0 if v.stop is None else v.stop * scale)), \
+                        int(round(0 if v.step is None else v.step * scale)) if v.step else None) \
                                     for v in bbox])
+
 
 # def _zoom_bbox(bbox, scale, target_size=None, is_downscale=True):
 #     def _even_check(v, t):

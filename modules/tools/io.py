@@ -11,7 +11,7 @@ ANTS_SCRIPTS_PATH_FMT = os.path.abspath(os.path.join(os.path.dirname(__file__), 
                                         os.path.pardir, \
                                         os.path.pardir, \
                                         os.path.pardir, \
-                                        'ANTs_Scripts' if os.name == 'posix' else 'ANTs'))
+                                        'ANTs_Scripts/' if os.name == 'posix' else 'ANTs'))
 
 def open_data(filepath):
     _, glob_ext = os.path.splitext(os.path.basename(filepath))
@@ -96,17 +96,24 @@ def check_files(working_dir, key_word):
     return False
 
 def get_path_by_name(fish_number, input_dir, isFindLabels=False):
+    print 'fish_number = %d, input_dir = %s, isFindLabels = %d' % (fish_number, input_dir, isFindLabels)
     if not os.path.exists(input_dir):
         os.makedirs(input_dir)
+
+    print 'LIST DIR:'
+    print os.listdir(input_dir)
 
     for fname in os.listdir(input_dir):
         path = os.path.join(input_dir, fname)
         if os.path.isfile(path):
+            print 'LABEL?'
             if isFindLabels:
                 if all(v in path for v in [str(fish_number), 'label']):
+                    print 'PATH %s - LABEL!!!YAYAYYAYA' % path
                     return path
             else:
-                if str(fish_number) in path:
+                if str(fish_number) in path and 'label' not in path:
+                    print 'PATH %s - NOT LABEL!!!NEINNEINNEIN' % path
                     return path
         else:
             continue

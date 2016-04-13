@@ -57,18 +57,26 @@ class FishDataEnv:
 
         return text
 
-def _build_fish_env(reference_fish_num, target_fish_num):
+def _build_fish_env(reference_fish_num, target_fish_num, zoom_level=2):
     return FishDataEnv(get_fish_project_folder(reference_fish_num),\
-                       get_fish_path(reference_fish_num),\
-                       get_fish_path(reference_fish_num, isLabel=True),\
+                       get_fish_path(reference_fish_num, zoom_level=zoom_level),\
+                       get_fish_path(reference_fish_num, zoom_level=zoom_level, isLabel=True),\
                        get_fish_project_folder(target_fish_num),\
-                       get_fish_path(target_fish_num),\
+                       get_fish_path(target_fish_num, zoom_level=zoom_level),\
                        reference_fish_num, \
                        target_fish_num)
 
 def _build_fish_data_paths():
     data = []
-    data.append(_build_fish_env(202, 204))
+    data.append(_build_fish_env(202, 204, zoom_level=2))
+    data.append(_build_fish_env(200, 215, zoom_level=2))
+    data.append(_build_fish_env(200, 223, zoom_level=2))
+    data.append(_build_fish_env(202, 226, zoom_level=2))
+    data.append(_build_fish_env(202, 230, zoom_level=2))
+    data.append(_build_fish_env(202, 231, zoom_level=2))
+    data.append(_build_fish_env(202, 233, zoom_level=2))
+    data.append(_build_fish_env(202, 238, zoom_level=2))
+    data.append(_build_fish_env(202, 243, zoom_level=2))
     return data
 
 def clean_version_run_brain_segmentation_unix(useAnts=True):
@@ -88,6 +96,8 @@ def clean_version_run_brain_segmentation_unix(useAnts=True):
 if __name__ == "__main__":
     #run_spine_segmentation("C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish204\\fish204_aligned_32bit_60x207x1220.raw")
     clean_version_run_brain_segmentation_unix()
-    #input_aligned_data, input_aligned_data_label = get_aligned_fish(204, zoom_level=8, min_zoom_level=4)
+    #input_aligned_data, input_aligned_data_label = get_aligned_fish(202, zoom_level=8, min_zoom_level=4)
+    #print input_aligned_data.dtype
+    #print input_aligned_data_label.dtype
     #output = get_aligned_fish(204, zoom_level=8, min_zoom_level=4)
     #print str(output)

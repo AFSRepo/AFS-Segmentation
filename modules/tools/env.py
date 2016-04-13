@@ -16,6 +16,7 @@ class DataEnvironment(object):
             os.makedirs(self.envs['project_path'])
 
         self.envs['input_data_path'] = input_filepath
+        self.envs['input_aligned_data_path'] = None
         self.envs['target_data_path'] = None
         self.envs['input_data_labels_path'] = None
         self.envs['input_data_spine_labels_path'] = None
@@ -100,6 +101,12 @@ class DataEnvironment(object):
 
     def get_input_spine_labels_path(self):
         return self.envs['input_data_spine_labels_path']
+
+    def set_input_align_data_path(self, filepath):
+        self.envs['input_aligned_data_path'] = filepath
+
+    def get_input_align_data_path(self):
+        return self.envs['input_aligned_data_path']
 
     def _get_ants_output_names(self, fixed_image_name, fixed_image_size, moving_image_name, moving_image_size, phase_name):
         final_name = '%s_%s_%sTO%s_%s' % (phase_name, moving_image_name, moving_image_size, fixed_image_name, fixed_image_size)
