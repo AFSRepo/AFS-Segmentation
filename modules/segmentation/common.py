@@ -7,9 +7,17 @@ from modules.tools.morphology import object_counter, gather_statistics, extract_
 from modules.tools.io import get_filename, open_data, save_as_nifti, check_files, parse_filename
 from modules.tools.processing import binarizator, get_aligned_fish
 from modules.tools.env import DataEnvironment
-from modules.tools.misc import Timer
+from modules.tools.misc import Timer, timing
 from scipy.ndimage.interpolation import zoom, rotate
 from modules.tools.io import ANTS_SCRIPTS_PATH_FMT
+
+# TODO:
+# 1. We detect and find data+labels in initialize_env ---> NO NEED trying to
+#    find labels on the stage of DataEnvironment feeding.
+# 2. Add checking of label existense, if a label is already aligned and located
+#    in AFS-output/Aligned/fish#, then we don't try to find anything in
+#    MedakaRawData/fish#
+
 
 #ANTs - 0 , NiftyReg - 1
 REG_TOOL = 1
@@ -60,7 +68,8 @@ def initialize_env(data_env, zoom_level=2, min_zoom_level=2):
             data_env.set_zoomed_effective_volume_bbox(zoomed_data_bbox)
             data_env.set_input_align_data_path(ext_volume_path)
 
-            if data_env.get_input_labels_path():
+            if aligned_data_label is not None:
+                print "#################### aligned_data_label = %s" % str(aligned_data_label.shape)
                 ext_volume_labels_niigz_path = data_env.get_new_volume_labels_niigz_path(aligned_data_label.shape, 'extracted')
                 zoomed_ext_volume_labels_niigz_path = data_env.get_new_volume_labels_niigz_path(zoomed_aligned_data_label.shape, 'zoomed_0p5_extracted')
 
@@ -72,6 +81,8 @@ def initialize_env(data_env, zoom_level=2, min_zoom_level=2):
 
                 aligned_data_label.tofile(ext_volume_labels_path)
                 zoomed_aligned_data_label.tofile(zoomed_ext_volume_labels_path)
+
+                data_env.set_input_aligned_data_labels_path(ext_volume_labels_path)
 
                 print "Abdomen and brain labels are written and zoomed"
         else:
@@ -2461,6 +2472,106 @@ def brain_segmentation(fixed_data_env, moving_data_env, use_full_size=False):
     else:
         print "The initially aligned completed unknown fish's brain labels is already upscaled to the input volume size."
 
+@timing
+def full_body_registration_ants(reference_data_env, target_data_env):
+    reference_data_env.load()
+    target_data_env.load()
+
+    # Crop the raw data
+    print "--Aligning and volumes' extraction"
+    reference_data_results = initialize_env(reference_data_env, zoom_level=2, min_zoom_level=2)
+    moving_data_results = initialize_env(target_data_env, zoom_level=2, min_zoom_level=2)
+
+    reference_data_env.save()
+    target_data_env.save()
+
+    print "--Pre-alignment of the target fish to the known one"
+    # Pre-alignment fish1 to fish_aligned
+    ants_prefix_prealign = 'full_body_pre_alignment'
+    ants_prealign_paths = target_data_env.get_aligned_data_paths(ants_prefix_prealign)
+    ants_prealign_names = target_data_env.get_aligned_data_paths(ants_prefix_prealign, produce_paths=False)
+
+    working_env_prealign = target_data_env
+    reference_image_path_prealign = reference_data_env.envs['zoomed_0p5_extracted_input_data_path_niigz']
+    reference_image_path_prealign_raw = reference_data_env.envs['zoomed_0p5_extracted_input_data_path']
+    target_image_path_prealign = target_data_env.envs['zoomed_0p5_extracted_input_data_path_niigz']
+    output_name_prealign = ants_prealign_names['out_name']
+    warped_path_prealign = ants_prealign_paths['warped']
+    iwarped_path_prealign = ants_prealign_paths['iwarp']
+
+    print 'reference_image_path_prealign = %s' % reference_image_path_prealign
+    print 'target_image_path_prealign = %s' % target_image_path_prealign
+
+    if not os.path.exists(warped_path_prealign):
+        align_fish_simple_ants(working_env_prealign, reference_image_path_prealign,\
+                               target_image_path_prealign, output_name_prealign, \
+                               warped_path_prealign, iwarped_path_prealign, \
+                               reg_prefix=ants_prefix_prealign, use_syn=False, \
+                               use_full_iters=False)
+
+        reference_data_env.save()
+        target_data_env.save()
+    else:
+        print "Data is already prealigned"
+
+    #print  "--FINITO LA COMEDIA!"
+    #return
+
+    print  "--Registration of the reference fish to the target one"
+    # Registration of fish_aligned to fish1
+    ants_prefix_sep = 'full_body_registration'
+    ants_separation_paths = reference_data_env.get_aligned_data_paths(ants_prefix_sep)
+    working_env_sep = reference_data_env
+    reference_image_path_sep = warped_path_prealign
+    target_image_path_sep = reference_image_path_prealign
+    output_name_sep = ants_separation_paths['out_name']
+    warped_path_sep = ants_separation_paths['warped']
+    iwarped_path_sep = ants_separation_paths['iwarp']
+
+    if not os.path.exists(warped_path_sep):
+        align_fish_simple_ants(working_env_sep, reference_image_path_sep, target_image_path_sep, \
+                               output_name_sep, warped_path_sep, iwarped_path_sep, \
+                               reg_prefix=ants_prefix_sep, use_syn=True, use_full_iters=True)
+
+        reference_data_env.save()
+        target_data_env.save()
+    else:
+        print "Data is already registered for separation"
+
+    print "--Transforming brain and abdomen labels of the reference fish to the target's one"
+    # Transforming labels of fish_aligned to fish1
+    wokring_env_tr = target_data_env
+    ref_image_path_tr = ants_prealign_paths['warped']
+    affine_transformation_path_tr = ants_separation_paths['gen_affine']
+    def_transformation_path_tr = ants_separation_paths['warp']
+    labels_image_path_tr = reference_data_env.envs['zoomed_0p5_extracted_input_data_labels_path_niigz']
+
+    print ref_image_path_tr
+    print affine_transformation_path_tr
+    print def_transformation_path_tr
+    print labels_image_path_tr
+
+
+    __, __, new_size, __ = parse_filename(reference_image_path_prealign_raw)
+
+    transformation_output_tr = target_data_env.get_new_volume_niigz_path(new_size, 'full_body_zoomed_0p5_extracted_labels', bits=8)
+    reg_prefix_tr = 'full_body_label_deforming'
+
+    print transformation_output_tr
+
+    if not os.path.exists(transformation_output_tr):
+        apply_transform_fish(wokring_env_tr, ref_image_path_tr, \
+                             affine_transformation_path_tr, \
+                             labels_image_path_tr, transformation_output_tr, \
+                             def_transformation_path=def_transformation_path_tr, \
+                             reg_prefix=reg_prefix_tr)
+
+        reference_data_env.save()
+        target_data_env.save()
+    else:
+        print "Abdomen and brain data is already transformed"
+
+@timing
 def brain_segmentation_ants(reference_data_env, target_data_env):
     reference_data_env.load()
     target_data_env.load()
@@ -2505,6 +2616,9 @@ def brain_segmentation_ants(reference_data_env, target_data_env):
     else:
         print "Data is already prealigned"
 
+    #print  "--FINITO LA COMEDIA!"
+    #return
+
     print  "--Registration of the reference fish to the target one"
     # Registration of fish_aligned to fish1
     ants_prefix_sep = 'parts_separation'
@@ -2534,14 +2648,18 @@ def brain_segmentation_ants(reference_data_env, target_data_env):
     def_transformation_path_tr = ants_separation_paths['warp']
     labels_image_path_tr = reference_data_env.envs['zoomed_0p5_extracted_input_data_labels_path_niigz']
 
+    print ref_image_path_tr
+    print affine_transformation_path_tr
+    print def_transformation_path_tr
     print labels_image_path_tr
-    print reference_image_path_prealign_raw
 
 
     __, __, new_size, __ = parse_filename(reference_image_path_prealign_raw)
 
     transformation_output_tr = target_data_env.get_new_volume_niigz_path(new_size, 'zoomed_0p5_extracted_labels', bits=8)
     reg_prefix_tr = 'label_deforming'
+
+    print transformation_output_tr
 
     if not os.path.exists(transformation_output_tr):
         apply_transform_fish(wokring_env_tr, ref_image_path_tr, \
@@ -2837,7 +2955,6 @@ def brain_segmentation_ants(reference_data_env, target_data_env):
     else:
         print "The initially aligned completed target fish's brain labels is already upscaled to the input volume size."
 
-
 def scale_to_size_old(target_data_path, extracted_scaled_data_path, extracted_data_bbox, scale=2.0, order=0):
     target_data = open_data(target_data_path)
     extracted_scaled_data = open_data(extracted_scaled_data_path)
@@ -3074,15 +3191,15 @@ def align_fish_simple_ants(working_env, fixed_image_path, moving_image_path, out
     app = None
 
     if not use_syn:
-        app = 'antsRegistrationSyNMid.sh -d 3 -f {fixedImagePath} ' \
-                '-m {movingImagePath} -o {out_name} -n {num_threads} -t r -p f'.format(**args_fmt)
+        app = 'antsRegistrationSyNExtended.sh -d 3 -f {fixedImagePath} ' \
+                '-m {movingImagePath} -o {out_name} -n {num_threads} -t k -p f'.format(**args_fmt)
     else:
         if use_full_iters:
-            app = 'antsRegistrationSyN.sh -d 3 -f {fixedImagePath} ' \
-                    '-m {movingImagePath} -o {out_name} -n {num_threads} -t b -p f'.format(**args_fmt)
+            app = 'antsRegistrationSyNExtended.sh -d 3 -f {fixedImagePath} ' \
+                    '-m {movingImagePath} -o {out_name} -n {num_threads} -t v -p f'.format(**args_fmt)
         else:
-            app = 'antsRegistrationSyNMid.sh -d 3 -f {fixedImagePath} ' \
-                    '-m {movingImagePath} -o {out_name} -n {num_threads} -t s -p f'.format(**args_fmt)
+            app = 'antsRegistrationSyNExtended.sh -d 3 -f {fixedImagePath} ' \
+                    '-m {movingImagePath} -o {out_name} -n {num_threads} -t g -p f'.format(**args_fmt)
 
     app = os.path.join(path_ants_scripts_fmt, app)
     print app

@@ -16,7 +16,7 @@ from modules.segmentation.eyes import eyes_statistics, eyes_zrange
 from modules.segmentation.spine import run_spine_segmentation
 from modules.segmentation.common import split_fish, align_fish
 from modules.segmentation.common import crop_align_data, brain_segmentation, \
-brain_segmentation_nifty, brain_segmentation_ants
+brain_segmentation_nifty, brain_segmentation_ants, full_body_registration_ants
 from scipy.ndimage.measurements import label, find_objects
 from scipy.ndimage.interpolation import zoom, rotate
 import pandas as pd
@@ -68,16 +68,14 @@ def _build_fish_env(reference_fish_num, target_fish_num, zoom_level=2):
 
 def _build_fish_data_paths():
     data = []
-    data.append(_build_fish_env(202, 204, zoom_level=2))
-    data.append(_build_fish_env(200, 215, zoom_level=2))
-    data.append(_build_fish_env(200, 223, zoom_level=2))
-    data.append(_build_fish_env(200, 226, zoom_level=2))
-    #data.append(_build_fish_env(202, 226, zoom_level=2))
-    data.append(_build_fish_env(202, 230, zoom_level=2))
-    data.append(_build_fish_env(202, 231, zoom_level=2))
-    data.append(_build_fish_env(202, 233, zoom_level=2))
-    data.append(_build_fish_env(202, 238, zoom_level=2))
     data.append(_build_fish_env(202, 243, zoom_level=2))
+    data.append(_build_fish_env(202, 204, zoom_level=2))
+    data.append(_build_fish_env(233, 238, zoom_level=2))
+    data.append(_build_fish_env(233, 230, zoom_level=2))
+    data.append(_build_fish_env(233, 231, zoom_level=2))
+    data.append(_build_fish_env(200, 215, zoom_level=2))
+    data.append(_build_fish_env(233, 223, zoom_level=2))
+    data.append(_build_fish_env(233, 226, zoom_level=2))
     return data
 
 def clean_version_run_brain_segmentation_unix(useAnts=True):
@@ -87,9 +85,9 @@ def clean_version_run_brain_segmentation_unix(useAnts=True):
     for fish_env in fishes_envs:
         print '############################# Fish %d -> Fish %d ###################################' % \
                                 (fish_env.reference_fish_num, fish_env.target_fish_num)
-        print fish_env
 
         if useAnts:
+            #full_body_registration_ants(fish_env.reference_data_env, fish_env.target_data_env)
             brain_segmentation_ants(fish_env.reference_data_env, fish_env.target_data_env)
         else:
             brain_segmentation_nifty(fish_env.reference_data_env, fish_env.target_data_env)
