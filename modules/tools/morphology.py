@@ -155,6 +155,7 @@ def object_counter(stack_binary_data):
     t = Timer()
     print 'Object counting - Labeling...'
     labeled_stack, num_labels = label(stack_binary_data)
+    print 'num_labels = %d' % num_labels
     t.elapsed('Object counting - Labeling...')
 
     t = Timer()

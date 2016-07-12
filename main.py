@@ -68,6 +68,7 @@ def _build_fish_env(reference_fish_num, target_fish_num, zoom_level=2):
 
 def _build_fish_data_paths():
     data = []
+    ######################################################### Correct
     data.append(_build_fish_env(202, 243, zoom_level=2))
     data.append(_build_fish_env(202, 204, zoom_level=2))
     data.append(_build_fish_env(233, 238, zoom_level=2))
@@ -76,6 +77,20 @@ def _build_fish_data_paths():
     data.append(_build_fish_env(200, 215, zoom_level=2))
     data.append(_build_fish_env(233, 223, zoom_level=2))
     data.append(_build_fish_env(233, 226, zoom_level=2))
+    ###################################################################
+
+    # data.append(_build_fish_env(202, 238, zoom_level=2))
+    # data.append(_build_fish_env(202, 230, zoom_level=2))
+    # data.append(_build_fish_env(202, 231, zoom_level=2))
+    # data.append(_build_fish_env(202, 223, zoom_level=2))
+    # data.append(_build_fish_env(202, 226, zoom_level=2))
+
+    # data.append(_build_fish_env(200, 238, zoom_level=2))
+    # data.append(_build_fish_env(200, 230, zoom_level=2))
+    # data.append(_build_fish_env(200, 231, zoom_level=2))
+    # data.append(_build_fish_env(200, 223, zoom_level=2))
+    # data.append(_build_fish_env(200, 226, zoom_level=2))
+
     return data
 
 def clean_version_run_brain_segmentation_unix(useAnts=True):

@@ -64,15 +64,17 @@ Optional arguments:
      -n:  Number of threads (default = 1)
 
      -t:  transform type (default = 's')
-        t: translation
-        k: similarity
-        r: rigid
-        a: rigid + affine
-        s: rigid + affine + deformable syn
-        b: rigid + affine + deformable b-spline syn
-        d: rigid + similarity + deformable b-spline syn
-        g: rigid + similarity + deformable b-spline syn (fast)
-        h: rigid + similarity
+         t: translation
+         k: similarity
+         r: rigid
+         a: rigid + affine
+         s: rigid + affine + deformable syn
+         b: rigid + affine + deformable b-spline syn
+         d: similarity + deformable b-spline syn
+         v: similarity + time varying velocity field
+         g: rigid + similarity + deformable b-spline syn (fast)
+         y: similarity + deformable b-spline syn (fast)
+         h: rigid + similarity
 
      -r:  radius for cross correlation metric used during SyN stage (default = 4)
 
@@ -141,9 +143,10 @@ Optional arguments:
         a: rigid + affine
         s: rigid + affine + deformable syn
         b: rigid + affine + deformable b-spline syn
-        d: rigid + similarity + deformable b-spline syn
-        v: rigid + similarity + time varying velocity field
+        d: similarity + deformable b-spline syn
+        v: similarity + time varying velocity field
         g: rigid + similarity + deformable b-spline syn (fast)
+        y: similarity + deformable b-spline syn (fast)
         h: rigid + similarity
 
      -r:  radius for cross correlation metric used during SyN stage (default = 4)
@@ -270,7 +273,7 @@ SPLINEDISTANCE=26
 TRANSFORMTYPE='s'
 PRECISIONTYPE='d'
 USEHISTOGRAMMATCHING=0
-CCRADIUS=4
+CCRADIUS=3
 
 # reading command line arguments
 while getopts "d:f:h:j:m:n:o:p:r:s:t:" OPT
@@ -404,14 +407,15 @@ SIMILARITYCONVERGENCE="[1000x500x250x250,1e-6,10]"
 SIMILARITYSHRINKFACTORS="8x4x2x1"
 SIMILARITYSMOOTHINGSIGMAS="3x2x1x0vox"
 
-SYNCONVERGENCEFAST="[500x300x150x250x0,1e-6,30]"
-SYNCONVERGENCE="[500x300x150x250x250,1e-6,30]"
+#SYNCONVERGENCEFAST="[500x300x150x250x0,1e-6,30]"
+SYNCONVERGENCEFAST="[500x300x300x300x0,1e-6,10]"
+SYNCONVERGENCE="[500x500x500x500x500,1e-7,10]"
 SYNSHRINKFACTORS="5x4x3x2x1"
 SYNSMOOTHINGSIGMAS="4x3x2x1x0vox"
 
 if [[ $ISLARGEIMAGE -eq 1 ]];
   then
-    TRANSLATIONCONVERGENCE="[1000x500x500x500,1e-7,10]"
+    TRANSLATIONCONVERGENCE="[1000x500x500x500,1e-7,20]"
     TRANSLATIONSHRINKFACTORS="12x8x4x2"
     TRANSLATIONSMOOTHINGSIGMAS="4x3x2x1vox"
 
@@ -427,8 +431,8 @@ if [[ $ISLARGEIMAGE -eq 1 ]];
     SIMILARITYSHRINKFACTORS="8x4x2x1"
     SIMILARITYSMOOTHINGSIGMAS="3x2x1x0vox"
 
-    SYNCONVERGENCEFAST="[300x150x250x0,1e-6,30]"
-    SYNCONVERGENCE="[300x150x250x250,1e-6,30]"
+    SYNCONVERGENCEFAST="[500x300x300x0,1e-6,10]"
+    SYNCONVERGENCE="[500x500x500x500,1e-7,10]"
     SYNSHRINKFACTORS="4x3x2x1"
     SYNSMOOTHINGSIGMAS="3x2x1x0vox"
   fi
@@ -453,13 +457,20 @@ AFFINESTAGE="--transform Affine[0.1] \
              --shrink-factors $AFFINESHRINKFACTORS \
              --smoothing-sigmas $AFFINESMOOTHINGSIGMAS"
 
+
 SIMILARITYSTAGE="--transform Similarity[0.1] \
                  --metric MI[${FIXEDIMAGES[0]},${MOVINGIMAGES[0]},1,32,Regular,0.25] \
                  --convergence $SIMILARITYCONVERGENCE \
                  --shrink-factors $SIMILARITYSHRINKFACTORS \
                  --smoothing-sigmas $SIMILARITYSMOOTHINGSIGMAS"
 
-if [[ $TRANSFORMTYPE == 'k' ]];
+if [[ $TRANSFORMTYPE == 'y' ]]
+  then
+    SIMILARITYSTAGE="--restrict-deformation 0x0x0x1x1x1x1 \
+                    ${SIMILARITYSTAGE}"
+  fi
+
+if [[ $TRANSFORMTYPE == 'k' || $TRANSFORMTYPE == 'd' || $TRANSFORMTYPE == 'v' || $TRANSFORMTYPE == 'y' ]];
   then
     SIMILARITYSTAGE="--initial-moving-transform [${FIXEDIMAGES[0]},${MOVINGIMAGES[0]},1] \
                     ${SIMILARITYSTAGE}"
@@ -468,7 +479,8 @@ if [[ $TRANSFORMTYPE == 'k' ]];
 SYNMETRICS=''
 for(( i=0; i<${#FIXEDIMAGES[@]}; i++ ))
   do
-    SYNMETRICS="$SYNMETRICS --metric MI[${FIXEDIMAGES[$i]},${MOVINGIMAGES[$i]},1,32,Regular,0.25]"
+    SYNMETRICS="$SYNMETRICS --metric CC[${FIXEDIMAGES[$i]},${MOVINGIMAGES[$i]},1,${CCRADIUS}]"
+    #SYNMETRICS="$SYNMETRICS --metric MI[${FIXEDIMAGES[$i]},${MOVINGIMAGES[$i]},1,32,Regular,0.25]"
     #SYNMETRICS="$SYNMETRICS --metric MeanSquares[${FIXEDIMAGES[$i]},${MOVINGIMAGES[$i]},1,0] \
     #            $SYNMETRICS --metric MI[${FIXEDIMAGES[$i]},${MOVINGIMAGES[$i]},1,32,Regular,0.25]"
   done
@@ -478,7 +490,7 @@ SYNSTAGE="${SYNMETRICS} \
           --shrink-factors $SYNSHRINKFACTORS \
           --smoothing-sigmas $SYNSMOOTHINGSIGMAS"
 
-if [[ $TRANSFORMTYPE == 'g' ]];
+if [[ $TRANSFORMTYPE == 'g' || $TRANSFORMTYPE == 'y' ]];
   then
     SYNSTAGE="${SYNMETRICS} \
               --convergence $SYNCONVERGENCEFAST \
@@ -513,10 +525,13 @@ case "$TRANSFORMTYPE" in
   STAGES="$RIGIDSTAGE $AFFINESTAGE $SYNSTAGE"
   ;;
 "d" | "v")
-  STAGES="$RIGIDSTAGE $SIMILARITYSTAGE $SYNSTAGE"
+  STAGES="$SIMILARITYSTAGE $SYNSTAGE"
   ;;
 "g")
   STAGES="$RIGIDSTAGE $SIMILARITYSTAGE $SYNSTAGE"
+  ;;
+"y")
+  STAGES="$SIMILARITYSTAGE $SYNSTAGE"
   ;;
 "h")
   STAGES="$RIGIDSTAGE $SIMILARITYSTAGE"

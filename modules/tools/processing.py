@@ -15,7 +15,7 @@ from skimage.measure import regionprops
 from ..segmentation.eyes import eyes_statistics, eyes_zrange
 from .morphology import object_counter, gather_statistics, extract_largest_area_data, stats_at_slice, rotate_stats, flip_stats
 from .misc import timing, Timer
-from .io import get_path_by_name, INPUT_DIR, OUTPUT_DIR, LSDF_DIR, create_filename_with_shape, parse_filename
+from .io import get_path_by_name, INPUT_DIR, OUTPUT_DIR, LSDF_DIR, create_filename_with_shape, parse_filename, create_raw_stack
 
 def binarizator(stack_data, eyes_stats=None, filter_size=6,
         non_zeros_ratio=0.5, tolerance=50, preserve_big_objects=True, verbose=False):

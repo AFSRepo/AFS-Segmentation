@@ -10,8 +10,7 @@ LSDF_DIR = '/mnt/LSDF' if os.name == 'posix' else "Z:\\"
 ANTS_SCRIPTS_PATH_FMT = os.path.abspath(os.path.join(os.path.dirname(__file__), \
                                         os.path.pardir, \
                                         os.path.pardir, \
-                                        os.path.pardir, \
-                                        'ANTs_Scripts/' if os.name == 'posix' else 'ANTs'))
+                                        'scripts'))
 
 def open_data(filepath):
     _, glob_ext = os.path.splitext(os.path.basename(filepath))
