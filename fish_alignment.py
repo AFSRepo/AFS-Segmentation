@@ -4,16 +4,19 @@ import pandas as pd
 import pickle
 import profile
 import pstats
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
+#import matplotlib.pyplot as plt
+#from mpl_toolkits.mplot3d import Axes3D
 from scipy.ndimage import map_coordinates
 from scipy.ndimage.morphology import binary_opening
-from modules.tools.processing import binarizator, align_fish_by_eyes_tail
+from modules.tools.processing import binarizator, align_fish_by_eyes_tail, get_aligned_fish
 from modules.tools.morphology import object_counter, gather_statistics, extract_largest_area_data, cell_counter, stats_at_slice
 from modules.segmentation.eyes import eyes_statistics
 from modules.tools.io import create_raw_stack, open_data, create_filename_with_shape, parse_filename
 
 TMP_PATH = "C:\\Users\\Administrator\\Documents\\tmp"
+
+
+'''
 def test_points_rotation():
     fig = plt.figure()
     #ax = fig.add_subplot(111, projection='3d')
@@ -678,8 +681,11 @@ def rotation_test():
         R = get_rot_matrix_arbitrary_axis(rot_axis[0], rot_axis[1], rot_axis[2], -theta)
         new_vec = (R * np.matrix(spinal_vec).T).T
         print '%s => %s : %f' % (str(np.array(spinal_vec)), str(np.array(new_vec)), np.rad2deg(theta))
+'''
 
 if __name__ == "__main__":
+    aligned_data, _ = get_aligned_fish(204, zoom_level=4, min_zoom_level=4)
+
     #test_points_rotation()
     #test_points_rotation2()
     #test_points_rotation3()
@@ -698,15 +704,15 @@ if __name__ == "__main__":
     #rotation_test()
     #filepath = "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish200\\fish200_rotated_32bit_286x286x1235.raw"
 
-    filepath = "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish204\\fish204_32bit_631x631x1992.raw"
+    #filepath = "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish204\\fish204_32bit_631x631x1992.raw"
     #filepath = "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish204\\fish204_32bit_315x315x996.raw"
 
     #filepath = "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish243\\fish243_32bit_320x320x996.raw"
     #filepath = "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish215\\fish215_32bit_640x640x2478.raw"
     #filepath = "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish215\\fish215_32bit_320x320x1239.raw"
     #filepath = "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish200\\fish200_rotated_32bit_286x286x1235.raw"
-    data = open_data(filepath)
-    aligned_data = align_fish_by_eyes_tail(data)
+    #data = open_data(filepath)
+    #aligned_data = align_fish_by_eyes_tail(data)
     # statspath = os.path.join(TMP_PATH, "fish200.stats")
     # profile.run('aligned_data = align_fish_by_eyes_tail(data)', statspath)
     # stats = pstats.Stats(statspath)
@@ -714,4 +720,4 @@ if __name__ == "__main__":
     # stats.sort_stats('percall')
     # stats.print_stats()
 
-    aligned_data.astype(np.float32).tofile(os.path.join(TMP_PATH, create_filename_with_shape(filepath, aligned_data.shape, prefix='aligned')))
+    #aligned_data.astype(np.float32).tofile(os.path.join(TMP_PATH, create_filename_with_shape(filepath, aligned_data.shape, prefix='aligned')))

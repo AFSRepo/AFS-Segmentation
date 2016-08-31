@@ -1,15 +1,19 @@
 import os
 import sys
+import pickle
 import subprocess as subpr
 import numpy as np
+from modules.segmentation.spine import run_spine_segmentation
 from modules.segmentation.eyes import eyes_statistics, eyes_zrange
-from modules.tools.morphology import object_counter, gather_statistics, extract_largest_area_data
+from modules.tools.morphology import object_counter, gather_statistics
+from modules.tools.morphology import extract_largest_area_data, extract_label_by_name
+from modules.tools.morphology import extract_largest_volume_by_label, extract_effective_volume
 from modules.tools.io import get_filename, open_data, save_as_nifti, check_files, parse_filename
 from modules.tools.processing import binarizator, get_aligned_fish
 from modules.tools.env import DataEnvironment
 from modules.tools.misc import Timer, timing
 from scipy.ndimage.interpolation import zoom, rotate
-from modules.tools.io import ANTS_SCRIPTS_PATH_FMT
+from modules.tools.io import ANTS_SCRIPTS_PATH_FMT, ORGAN_LABEL_TEMPLATE, ORGAN_DATA_TEMPLATE
 from scipy.ndimage import binary_dilation, generate_binary_structure
 
 # TODO:
@@ -22,8 +26,10 @@ from scipy.ndimage import binary_dilation, generate_binary_structure
 
 #ANTs - 0 , NiftyReg - 1
 REG_TOOL = 1
+ZOOM_KEY = "zoomed"
+NORMAL_KEY = "normal"
 
-def initialize_env(data_env, zoom_level=2, min_zoom_level=2):
+def initialize_env(data_env, zoom_level=2, min_zoom_level=2, organs_labels=None):
     print '--Aligning fish%d' % data_env.fish_num
 
     t = Timer()
@@ -45,8 +51,8 @@ def initialize_env(data_env, zoom_level=2, min_zoom_level=2):
             #zoomed_aligned_data, zoomed_aligned_data_label = get_aligned_fish(data_env.fish_num, zoom_level=4)zoom_level=2, min_zoom_level=2
 
             #aligned_data, aligned_data_label = np.zeros((1,1), dtype=np.float32), np.zeros((1,1), dtype=np.float32)
-            aligned_data, aligned_data_label = get_aligned_fish(data_env.fish_num, zoom_level=zoom_level, min_zoom_level=min_zoom_level)
-            zoomed_aligned_data, zoomed_aligned_data_label = get_aligned_fish(data_env.fish_num, zoom_level=zoom_level*2, min_zoom_level=min_zoom_level)
+            aligned_data, aligned_data_label, aligned_data_organs_labels = get_aligned_fish(data_env.fish_num, zoom_level=zoom_level, min_zoom_level=min_zoom_level, organs_labels=organs_labels)
+            zoomed_aligned_data, zoomed_aligned_data_label, zoomed_aligned_data_organs_labels = get_aligned_fish(data_env.fish_num, zoom_level=zoom_level*2, min_zoom_level=min_zoom_level, organs_labels=organs_labels)
 
             ext_volume_niigz_path = data_env.get_new_volume_niigz_path(aligned_data.shape, 'extracted')
             zoomed_ext_volume_niigz_path = data_env.get_new_volume_niigz_path(zoomed_aligned_data.shape, 'zoomed_0p5_extracted')
@@ -87,6 +93,42 @@ def initialize_env(data_env, zoom_level=2, min_zoom_level=2):
                 data_env.set_input_aligned_data_labels_path(ext_volume_labels_path)
 
                 print "Abdomen and brain labels are written and zoomed"
+
+            if (aligned_data_organs_labels is not None) and (zoomed_aligned_data_organs_labels is not None):
+                print "#################### aligned_data_organs_labels"
+
+                for organ_name in aligned_data_organs_labels.keys():
+                    ext_normal_organ_labels = aligned_data_organs_labels[organ_name]
+                    zoomed_ext_normal_organ_labels = zoomed_aligned_data_organs_labels[organ_name]
+
+                    ext_normal_organ_labels_niigz_path = data_env.get_new_volume_labels_niigz_path(ext_normal_organ_labels.shape, 'extracted_%s_labels' % organ_name)
+                    zoomed_ext_normal_organ_labels_niigz_path = data_env.get_new_volume_labels_niigz_path(zoomed_ext_normal_organ_labels.shape, 'zoomed_0p5_extracted_%s_labels' % organ_name)
+
+                    save_as_nifti(ext_normal_organ_labels, ext_normal_organ_labels_niigz_path)
+                    save_as_nifti(zoomed_ext_normal_organ_labels, zoomed_ext_normal_organ_labels_niigz_path)
+
+                    dict_organs_labels = data_env.get_organs_labels()
+                    dict_organs_labels[organ_name] = { 'normal': ext_normal_organ_labels_niigz_path, 'zoomed': zoomed_ext_normal_organ_labels_niigz_path }
+                    data_env.set_organs_labels(dict_organs_labels)
+
+                    update_organs_envs(data_env, "original_organs", organ_name, \
+                                       'label', ZOOM_KEY, \
+                                       zoomed_ext_normal_organ_labels_niigz_path)
+
+                    update_organs_envs(data_env, "original_organs", organ_name, \
+                                       'label', NORMAL_KEY, \
+                                       ext_normal_organ_labels_niigz_path)
+
+                    update_organs_envs(data_env, "original_organs", organ_name, \
+                                       'data', ZOOM_KEY, \
+                                       zoomed_ext_volume_niigz_path)
+
+                    update_organs_envs(data_env, "original_organs", organ_name, \
+                                       'data', NORMAL_KEY, \
+                                       ext_volume_niigz_path)
+
+                    print "ORGANS are INITIALIZED!"
+
         else:
             print 'There\'s no input data'
 
@@ -1374,7 +1416,6 @@ def crop_align_data(fixed_data_env, moving_data_env):
         else:
             print "The spine of the fixed abdomen data is already transformed (Full size)"
 
-
 def brain_segmentation_nifty(fixed_data_env, moving_data_env, use_full_size=False):
 
     fixed_data_env.load()
@@ -1747,7 +1788,6 @@ def brain_segmentation_nifty(fixed_data_env, moving_data_env, use_full_size=Fals
     else:
         print "The initially aligned completed unknown fish's brain labels is already upscaled to the input volume size."
 
-
 def brain_segmentation(fixed_data_env, moving_data_env, use_full_size=False):
 
     fixed_data_env.load()
@@ -1757,8 +1797,6 @@ def brain_segmentation(fixed_data_env, moving_data_env, use_full_size=False):
     print "--Extracting net volumes"
     fixed_data_results = produce_cropped_data(fixed_data_env)
     moving_data_results = produce_cropped_data(moving_data_env)
-
-    print moving_data_env.get_effective_volume_bbox()
 
     fixed_data_env.save()
     moving_data_env.save()
@@ -2481,7 +2519,8 @@ def full_body_registration_ants(reference_data_env, target_data_env):
 
     # Crop the raw data
     print "--Aligning and volumes' extraction"
-    reference_data_results = initialize_env(reference_data_env, zoom_level=2, min_zoom_level=2)
+
+    reference_data_results = initialize_env(reference_data_env, zoom_level=2, min_zoom_level=2, organs_labels=organs_labels)
     moving_data_results = initialize_env(target_data_env, zoom_level=2, min_zoom_level=2)
 
     reference_data_env.save()
@@ -2573,19 +2612,2117 @@ def full_body_registration_ants(reference_data_env, target_data_env):
     else:
         print "Abdomen and brain data is already transformed"
 
-@timing
-def brain_segmentation_ants(reference_data_env, target_data_env):
+def simple_heart_segmentation_ants(reference_data_env, target_data_env):
+    reference_data_env.load()
+    target_data_env.load()
+
+    print "--Transfrom labels of reference fish's organs into the target's one..."
+
+    target_organs_labels_dict = target_data_env.get_organs_labels()
+    reference_organs_labels_dict = reference_data_env.get_organs_labels()
+
+    print 'reference_organs_labels_dict = %s' % str(reference_organs_labels_dict)
+    print 'target_labels_dict = %s' % str(target_organs_labels_dict)
+
+    ants_prefix_sep = 'parts_separation'
+    ants_registration_paths = reference_data_env.get_aligned_data_paths(ants_prefix_sep)
+
+    if True:
+    #if not target_organs_labels_dict:
+        for organ_name, organ_labels in reference_organs_labels_dict.iteritems():
+            print '----Extracting abdomenal organ %s' % organ_name
+
+            organ_ref_image_path_ext_htr = target_data_env.envs['zoomed_0p5_extracted_input_data_path_niigz']
+            organ_transformation_path_ext_htr = ants_registration_paths['gen_affine']
+            organ_def_transformation_path_ext_htr = ants_registration_paths['warp']
+            organ_labels_image_path_ext_htr = organ_labels['zoomed']
+
+            organ_test_data_ext_htr = open_data(organ_ref_image_path_ext_htr)
+            organ_transformation_output_ext_htr = target_data_env.get_new_volume_niigz_path(organ_test_data_ext_htr.shape, 'zoomed_0p5_extracted_organ_%s_labels' % organ_name)
+            organ_reg_prefix_ext_htr = 'extracted_organ_%s_label_deforming_fullbody' % organ_name
+
+            if True:
+            #if not os.path.exists(organ_transformation_output_ext_htr):
+                apply_transform_fish(target_data_env, organ_ref_image_path_ext_htr, \
+                                     organ_transformation_path_ext_htr, organ_labels_image_path_ext_htr, \
+                                     organ_transformation_output_ext_htr, \
+                                     def_transformation_path=organ_def_transformation_path_ext_htr, \
+                                     reg_prefix=organ_reg_prefix_ext_htr)
+
+                target_organs_labels_dict[organ_name] = { 'normal': None, 'zoomed': organ_transformation_output_ext_htr }
+                target_data_env.set_organs_labels(target_organs_labels_dict)
+
+                reference_data_env.save()
+                target_data_env.save()
+            else:
+                print "Extracted organ '%s' data is already transformed" % organ_name
+
+    reference_data_env.save()
+    target_data_env.save()
+
+    print 'reference_organs_labels_dict = %s' % str(reference_data_env.get_organs_labels())
+    print 'target_labels_dict = %s' % str(target_data_env.get_organs_labels())
+
+    print "--Upscale the target fish's organs labels to the initial volume size..."
+    target_organs_labels_dict = target_data_env.get_organs_labels()
+
+    if True:
+    #if target_organs_labels_dict:
+        for organ_name, organ_labels in target_organs_labels_dict.iteritems():
+            zoomed_organ_label_path = organ_labels['zoomed']
+
+            original_aligned_data_path = target_data_env.get_input_align_data_path()
+            original_aligned_data = open_data(original_aligned_data_path)
+
+            upscaled_organ_label_niigz_path = target_data_env.get_new_volume_niigz_path(original_aligned_data.shape, 'extracted_organ_%s_labels' % organ_name, bits=8)
+
+            if True:
+            #if not os.path.exists(upscaled_organ_label_niigz_path):
+                upscaled_organ_label_data = scale_to_size(original_aligned_data_path, \
+                                                          zoomed_organ_label_path, \
+                                                          scale=2.0, \
+                                                          order=0)
+                save_as_nifti(upscaled_organ_label_data, upscaled_organ_label_niigz_path)
+                target_organs_labels_dict[organ_name]['normal'] = upscaled_organ_label_niigz_path
+
+        target_data_env.set_organs_labels(target_organs_labels_dict)
+
+        reference_data_env.save()
+        target_data_env.save()
+    else:
+        print "The target fish's organs labels are already upscaled to the input volume size."
+
+    print 'reference_organs_labels_dict = %s' % str(reference_data_env.get_organs_labels())
+    print 'target_labels_dict = %s' % str(target_data_env.get_organs_labels())
+
+    bb_side_offset = 20
+
+    print "--Extract the target fish's organs labels from the initial volume..."
+    target_extracted_organs_dict = target_data_env.get_extracted_organs()
+    target_extracted_organs_labels_dict = target_data_env.get_extracted_organs_labels()
+    target_organs_labels_dict = target_data_env.get_organs_labels()
+
+    if True:
+    #if (not target_extracted_organs_labels_dict) and (not target_extracted_organs_dict):
+        for organ_name, organ_labels in target_organs_labels_dict.iteritems():
+            normal_organ_label_path = organ_labels['normal']
+            normal_organ_label_data = open_data(normal_organ_label_path)
+
+            original_aligned_data_path = target_data_env.get_input_align_data_path()
+            original_aligned_data = open_data(original_aligned_data_path)
+
+            extracted_organ, extracted_organ_bbox = extract_largest_volume_by_label(original_aligned_data, normal_organ_label_data, bb_side_offset=bb_side_offset)
+            extracted_organ_label = normal_organ_label_data[extracted_organ_bbox]
+
+            extracted_organ_niigz_path = target_data_env.get_new_volume_niigz_path(extracted_organ.shape, 'extracted_roi_organ_%s' % organ_name)
+            extracted_organ_label_niigz_path = target_data_env.get_new_volume_niigz_path(extracted_organ_label.shape, 'extracted_roi_organ_%s_label' % organ_name, bits=8)
+
+            print extracted_organ_niigz_path
+            print extracted_organ_label_niigz_path
+
+            if True:
+            #if not os.path.exists(extracted_organ_niigz_path):
+                save_as_nifti(extracted_organ, extracted_organ_niigz_path)
+
+            if True:
+            #if not os.path.exists(extracted_organ_label_niigz_path):
+                save_as_nifti(extracted_organ_label, extracted_organ_label_niigz_path)
+
+            target_extracted_organs_dict[organ_name] = { 'normal': extracted_organ_niigz_path, 'zoomed': None }
+            target_extracted_organs_labels_dict[organ_name] = { 'normal': extracted_organ_label_niigz_path, 'zoomed': None }
+
+            target_data_env.set_extracted_organs(target_extracted_organs_dict)
+            target_data_env.set_extracted_organs_labels(target_extracted_organs_labels_dict)
+
+            reference_data_env.save()
+            target_data_env.save()
+
+    print 'target_data_env.get_extracted_organs = %s' % str(target_data_env.get_extracted_organs())
+    print 'target_data_env.get_extracted_organs_labels = %s' % str(target_data_env.get_extracted_organs_labels())
+
+    print "--Extract the reference fish's organs labels from the initial volume..."
+    reference_extracted_organs_dict = reference_data_env.get_extracted_organs()
+    reference_extracted_organs_labels_dict = reference_data_env.get_extracted_organs_labels()
+    reference_organs_labels_dict = reference_data_env.get_organs_labels()
+
+    if True:
+    #if (not reference_extracted_organs_labels_dict) and (not reference_extracted_organs_dict):
+        for organ_name, organ_labels in reference_organs_labels_dict.iteritems():
+            normal_organ_label_path = organ_labels['normal']
+            normal_organ_label_data = open_data(normal_organ_label_path)
+
+            original_aligned_data_path = reference_data_env.get_input_align_data_path()
+            original_aligned_data = open_data(original_aligned_data_path)
+
+            extracted_organ, extracted_organ_bbox = extract_largest_volume_by_label(original_aligned_data, normal_organ_label_data, bb_side_offset=bb_side_offset)
+            extracted_organ_label = normal_organ_label_data[extracted_organ_bbox]
+
+            extracted_organ_niigz_path = reference_data_env.get_new_volume_niigz_path(extracted_organ.shape, 'extracted_roi_organ_%s' % organ_name)
+            extracted_organ_label_niigz_path = reference_data_env.get_new_volume_niigz_path(extracted_organ_label.shape, 'extracted_roi_organ_%s_label' % organ_name, bits=8)
+
+            print extracted_organ_niigz_path
+            print extracted_organ_label_niigz_path
+
+            if True:
+            #if not os.path.exists(extracted_organ_niigz_path):
+                save_as_nifti(extracted_organ, extracted_organ_niigz_path)
+
+            if True:
+            #if not os.path.exists(extracted_organ_label_niigz_path):
+                save_as_nifti(extracted_organ_label, extracted_organ_label_niigz_path)
+
+            reference_extracted_organs_dict[organ_name] = { 'normal': extracted_organ_niigz_path, 'zoomed': None }
+            reference_extracted_organs_labels_dict[organ_name] = { 'normal': extracted_organ_label_niigz_path, 'zoomed': None }
+
+            reference_data_env.set_extracted_organs(reference_extracted_organs_dict)
+            reference_data_env.set_extracted_organs_labels(reference_extracted_organs_labels_dict)
+
+            reference_data_env.save()
+            target_data_env.save()
+
+    print 'reference_data_env.get_extracted_organs = %s' % str(reference_data_env.get_extracted_organs())
+    print 'reference_data_env.get_extracted_organs_labels = %s' % str(reference_data_env.get_extracted_organs_labels())
+
+    print "--Register the extracted reference fish's orgnas to the target's one..."
+    target_extracted_organs_dict = target_data_env.get_extracted_organs()
+    reference_extracted_organs_dict = reference_data_env.get_extracted_organs()
+
+    reference_extracted_organs_registration_dict = reference_data_env.get_extracted_organs_registration()
+    if True:
+    #if not reference_extracted_organs_registration_dict:
+        for organ_name, _ in reference_extracted_organs_dict.iteritems():
+
+            ants_prefix_reg = 'andomen_extracted_%s_registration' % organ_name
+            ants_reg_paths = reference_data_env.get_aligned_data_paths(ants_prefix_reg)
+            output_name_reg = ants_reg_paths['out_name']
+            warped_path_reg = ants_reg_paths['warped']
+            iwarped_path_reg = ants_reg_paths['iwarp']
+
+            if True:
+            #if not os.path.exists(warped_path_reg):
+                align_fish_simple_ants(reference_data_env, \
+                               target_extracted_organs_dict[organ_name]['normal'], \
+                               reference_extracted_organs_dict[organ_name]['normal'], \
+                               output_name_reg, \
+                               warped_path_reg, \
+                               iwarped_path_reg, \
+                               reg_prefix=ants_prefix_reg, \
+                               use_syn=True, \
+                               use_full_iters=True)
+
+                reference_extracted_organs_registration_dict[organ_name] = { 'normal': ants_prefix_reg, 'zoomed': None }
+                reference_data_env.set_extracted_organs_registration(reference_extracted_organs_registration_dict)
+
+                reference_data_env.save()
+                target_data_env.save()
+    else:
+        print "The organs of the reference data is already registered to the target one"
+
+
+    print "--Transfrom extracted labels of reference fish's organs into the target's one..."
+    target_extracted_organs_dict = target_data_env.get_extracted_organs()
+    reference_extracted_organs_labels_dict = reference_data_env.get_extracted_organs_labels()
+    reference_extracted_organs_registration_dict = reference_data_env.get_extracted_organs_registration()
+    target_extracted_organs_registration_labels_dict = target_data_env.get_extracted_organs_registration_labels()
+
+    if True:
+    #if not target_extracted_organs_registration_labels_dict:
+        for organ_name, organ_reg_prefixes in reference_extracted_organs_registration_dict.iteritems():
+            print '----Transforming abdomenal organ %s' % organ_name
+            ants_reg_paths = reference_data_env.get_aligned_data_paths(organ_reg_prefixes['normal'])
+
+            organ_ref_image_path = target_extracted_organs_dict[organ_name]['normal']
+            organ_transformation_path = ants_reg_paths['gen_affine']
+            organ_def_transformation_path = ants_reg_paths['warp']
+            organ_labels_image_path = reference_extracted_organs_labels_dict[organ_name]['normal']
+
+            organ_test_data = open_data(organ_ref_image_path)
+            organ_transformation_output = target_data_env.get_new_volume_niigz_path(organ_test_data.shape, 'extracted_deformed_organ_%s_labels' % organ_name)
+            organ_reg_prefix = 'extracted_organ_%s_label_deforming_extracted_region' % organ_name
+
+            if True:
+            #if not os.path.exists(organ_transformation_output):
+                apply_transform_fish(target_data_env, organ_ref_image_path, \
+                                     organ_transformation_path, organ_labels_image_path, \
+                                     organ_transformation_output, \
+                                     def_transformation_path=organ_def_transformation_path, \
+                                     reg_prefix=organ_reg_prefix)
+
+                target_extracted_organs_registration_labels_dict[organ_name] = { 'normal': None, 'zoomed': organ_transformation_output }
+                target_data_env.set_extracted_organs_registration_labels(target_extracted_organs_registration_labels_dict)
+
+                reference_data_env.save()
+                target_data_env.save()
+            else:
+                print "Extracted organ '%s' data is already transformed" % organ_name
+
+    reference_data_env.save()
+    target_data_env.save()
+
+    print "--Segment target fish's organs data..."
+    target_extracted_organs_dict = target_data_env.get_extracted_organs()
+    target_extracted_organs_labels_dict = target_data_env.get_extracted_organs_labels()
+
+    target_extracted_organs_masked_dict = target_data_env.get_extracted_organs_masked()
+    if True:
+    #if not target_extracted_organs_masked_dict:
+        for organ_name, _ in target_extracted_organs_dict.iteritems():
+            normal_organ_label_path = target_extracted_organs_labels_dict[organ_name]['normal']
+            normal_organ_data_path = target_extracted_organs_dict[organ_name]['normal']
+
+            normal_organ_label = open_data(normal_organ_label_path)
+            normal_organ_data = open_data(normal_organ_data_path)
+
+            masked_normal_organ_data = normal_organ_data * normal_organ_label
+
+            masked_normal_organ_data_niigz_path = \
+            target_data_env.get_new_volume_niigz_path(masked_normal_organ_data.shape, 'extracted_segmented_roi_organ_%s' % organ_name)
+
+            if True:
+            #if not os.path.exists(masked_normal_organ_data_niigz_path):
+                save_as_nifti(masked_normal_organ_data, masked_normal_organ_data_niigz_path)
+
+            target_extracted_organs_masked_dict[organ_name] = { 'normal': masked_normal_organ_data_niigz_path, 'zoomed': None }
+            target_data_env.set_extracted_organs_masked(target_extracted_organs_masked_dict)
+
+            reference_data_env.save()
+            target_data_env.save()
+
+    print "--Segment reference fish's organs data..."
+    reference_extracted_organs_dict = reference_data_env.get_extracted_organs()
+    reference_extracted_organs_labels_dict = reference_data_env.get_extracted_organs_labels()
+
+    reference_extracted_organs_masked_dict = reference_data_env.get_extracted_organs_masked()
+    if True:
+    #if not reference_extracted_organs_masked_dict:
+        for organ_name, _ in reference_extracted_organs_dict.iteritems():
+            normal_organ_label_path = reference_extracted_organs_labels_dict[organ_name]['normal']
+            normal_organ_data_path = reference_extracted_organs_dict[organ_name]['normal']
+
+            normal_organ_label = open_data(normal_organ_label_path)
+            normal_organ_data = open_data(normal_organ_data_path)
+
+            masked_normal_organ_data = normal_organ_data * normal_organ_label
+
+            masked_normal_organ_data_niigz_path = \
+            reference_data_env.get_new_volume_niigz_path(masked_normal_organ_data.shape, 'extracted_segmented_roi_organ_%s' % organ_name)
+
+            if True:
+            # if not os.path.exists(masked_normal_organ_data_niigz_path):
+                save_as_nifti(masked_normal_organ_data, masked_normal_organ_data_niigz_path)
+
+            reference_extracted_organs_masked_dict[organ_name] = { 'normal': masked_normal_organ_data_niigz_path, 'zoomed': None }
+            reference_data_env.set_extracted_organs_masked(reference_extracted_organs_masked_dict)
+
+            reference_data_env.save()
+            target_data_env.save()
+
+def heart_segmentation_ants(reference_data_env, target_data_env):
     bb_side_offset = 10
     reference_data_env.load()
     target_data_env.load()
 
-    # Crop the raw data
-    print "--Aligning and volumes' extraction"
-    reference_data_results = initialize_env(reference_data_env, zoom_level=2, min_zoom_level=2)
-    moving_data_results = initialize_env(target_data_env, zoom_level=2, min_zoom_level=2)
+    print 'reference_data_env.zoomed_0p5_abdomen_input_data_path_niigz = %s' % reference_data_env.envs['zoomed_0p5_abdomen_input_data_path_niigz']
+    print 'target_data_env.zoomed_0p5_abdomen_input_data_path_niigz = %s' % target_data_env.envs['zoomed_0p5_abdomen_input_data_path_niigz']
+
+
+    print "--Register reference fish's abdomenal part to the target's one..."
+    #Register reference abdomen to target one
+    ants_prefix_abdomen_reg = 'abdomen_registration'
+    ants_abdomen_reg_paths = reference_data_env.get_aligned_data_paths(ants_prefix_abdomen_reg)
+    reference_image_path_abdomen_reg = reference_data_env.envs['zoomed_0p5_abdomen_input_data_path_niigz']
+    target_image_path_abdomen_reg = target_data_env.envs['zoomed_0p5_abdomen_input_data_path_niigz']
+    output_name_abdomen_reg = ants_abdomen_reg_paths['out_name']
+    warped_path_abdomen_reg = ants_abdomen_reg_paths['warped']
+    iwarped_path_abdomen_reg = ants_abdomen_reg_paths['iwarp']
+
+    if True:
+    #if not os.path.exists(warped_path_abdomen_reg):
+        align_fish_simple_ants(reference_data_env, target_image_path_abdomen_reg, \
+                               reference_image_path_abdomen_reg, output_name_abdomen_reg, \
+                               warped_path_abdomen_reg, iwarped_path_abdomen_reg, \
+                               reg_prefix=ants_prefix_abdomen_reg, use_syn=True, \
+                               use_full_iters=False)
+
+        reference_data_env.save()
+        target_data_env.save()
+    else:
+        print "Abdomenal part of the reference data is already registered to the abdomenal part of target one"
+
+    print "--Transfrom labels of reference fish's abdomenal part into the target's one..."
+    # Transforming labels of abdomenal part of reference fish to the abdomenal part of target one
+    ref_image_path_htr = target_data_env.envs['zoomed_0p5_abdomen_input_data_path_niigz']
+    transformation_path_htr = ants_abdomen_reg_paths['gen_affine']
+    def_transformation_path_htr = ants_abdomen_reg_paths['warp']
+    labels_image_path_htr = reference_data_env.envs['zoomed_0p5_abdomen_labels_input_data_path_niigz']
+    test_data_htr = open_data(ref_image_path_htr)
+    transformation_output_htr = target_data_env.get_new_volume_niigz_path(test_data_htr.shape, 'zoomed_0p5_abdomen_labels', bits=8)
+    reg_prefix_htr = 'abdomen_label_deforming'
+
+    if True:
+    #if not os.path.exists(transformation_output_htr):
+        apply_transform_fish(target_data_env, ref_image_path_htr, \
+                             transformation_path_htr, labels_image_path_htr, \
+                             transformation_output_htr, \
+                             def_transformation_path=def_transformation_path_htr, \
+                             reg_prefix=reg_prefix_htr)
+        reference_data_env.save()
+        target_data_env.save()
+    else:
+        print "Abdomenal part data is already transformed"
+
+    print "--Extract the target fish's abdomenal part using transformed abdomenal part labels..."
+    # Extract target abdomenal part volume
+    abdomen_part_label_target = open_data(transformation_output_htr)
+    abdomen_part_data_target = open_data(ref_image_path_htr)
+    abdomen_part_data_volume_target, abdomen_part_data_volume_target_bbox = extract_largest_volume_by_label(abdomen_part_data_target, abdomen_part_label_target, bb_side_offset=bb_side_offset)
+    abdomen_part_data_volume_target_niigz_path = target_data_env.get_new_volume_niigz_path(abdomen_part_data_volume_target.shape, 'zoomed_0p5_extracted_abdomen_part')
+
+    print abdomen_part_data_volume_target_niigz_path
+
+    # if True:
+    if not os.path.exists(abdomen_part_data_volume_target_niigz_path):
+        save_as_nifti(abdomen_part_data_volume_target, abdomen_part_data_volume_target_niigz_path)
 
     reference_data_env.save()
     target_data_env.save()
+
+    print "--Extract the reference fish's abdomenal part using transformed abdomenal part labels..."
+    # Extract reference brain volume
+    abdomen_part_data_reference = open_data(reference_image_path_abdomen_reg)
+    abdomen_part_label_reference = open_data(labels_image_path_htr)
+    abdomen_part_data_volume_reference, abdomen_part_reference_bbox = extract_largest_volume_by_label(abdomen_part_data_reference, abdomen_part_label_reference, bb_side_offset=bb_side_offset)
+    abdomen_part_data_labels_volume_reference = abdomen_part_label_reference[abdomen_part_reference_bbox]
+
+    abdomen_part_data_volume_reference_niigz_path = reference_data_env.get_new_volume_niigz_path(abdomen_part_data_volume_reference.shape, 'zoomed_0p5_extracted_abdomen_part')
+    abdomen_part_data_labels_volume_reference_niigz_path = reference_data_env.get_new_volume_niigz_path(abdomen_part_data_labels_volume_reference.shape, 'zoomed_0p5_extracted_abdomen_part_labels')
+
+    print abdomen_part_data_volume_reference_niigz_path
+    print abdomen_part_data_labels_volume_reference_niigz_path
+
+    # if True:
+    if not os.path.exists(abdomen_part_data_volume_reference_niigz_path):
+        save_as_nifti(abdomen_part_data_volume_reference, abdomen_part_data_volume_reference_niigz_path)
+
+    # if True:
+    if not os.path.exists(abdomen_part_data_labels_volume_reference_niigz_path):
+        save_as_nifti(abdomen_part_data_labels_volume_reference, abdomen_part_data_labels_volume_reference_niigz_path)
+
+    reference_data_env.save()
+    target_data_env.save()
+
+    print "--Extract the reference fish's abdomenal part organs using transformed abdomenal part labels..."
+    extracted_abdomen_part_separated_organs_labels_dict = reference_data_env.get_extracted_abdomen_part_separated_organs_labels()
+
+    print 'extracted_abdomen_part_separated_organs_labels_dict = %s' % str(reference_data_env.get_extracted_abdomen_part_separated_organs_labels())
+
+    if not extracted_abdomen_part_separated_organs_labels_dict:
+        abdomen_separated_organs_labels_dict = reference_data_env.get_abdomen_separated_organs_labels()
+
+        for organ_name, organ_labels in abdomen_separated_organs_labels_dict.iteritems():
+            zoomed_abdomen_separated_organ_label_path = organ_labels['zoomed']
+            zoomed_abdomen_separated_organ_label_data = open_data(zoomed_abdomen_separated_organ_label_path)
+
+            abdomen_part_data_organ_label_volume_reference = zoomed_abdomen_separated_organ_label_data[abdomen_part_reference_bbox]
+
+            abdomen_part_data_organ_label_volume_reference_niigz_path = reference_data_env.get_new_volume_niigz_path(abdomen_part_data_organ_label_volume_reference.shape, 'zoomed_0p5_extracted_abdomen_part_organ_%s_labels' % organ_name)
+            if not os.path.exists(abdomen_part_data_organ_label_volume_reference_niigz_path):
+                save_as_nifti(abdomen_part_data_organ_label_volume_reference, abdomen_part_data_organ_label_volume_reference_niigz_path)
+
+            extracted_abdomen_part_separated_organs_labels_dict[organ_name] = { 'normal': None, 'zoomed': abdomen_part_data_organ_label_volume_reference_niigz_path }
+
+    reference_data_env.set_extracted_abdomen_part_separated_organs_labels(extracted_abdomen_part_separated_organs_labels_dict)
+    reference_data_env.save()
+
+    print 'extracted_abdomen_part_separated_organs_labels_dict = %s' % str(reference_data_env.get_extracted_abdomen_part_separated_organs_labels())
+
+    print "--Register reference fish's extracted abdomenal part to the target's one..."
+    #Register reference abdomen to target one
+    ants_prefix_ext_abdomen_reg = 'extracted_abdomen_part_registration'
+    ants_ext_abdomen_reg_paths = reference_data_env.get_aligned_data_paths(ants_prefix_ext_abdomen_reg)
+
+    reference_image_path_ext_abdomen_reg = abdomen_part_data_volume_reference_niigz_path
+    target_image_path_ext_abdomen_reg = abdomen_part_data_volume_target_niigz_path
+
+    output_name_ext_abdomen_reg = ants_ext_abdomen_reg_paths['out_name']
+    warped_path_ext_abdomen_reg = ants_ext_abdomen_reg_paths['warped']
+    iwarped_path_ext_abdomen_reg = ants_ext_abdomen_reg_paths['iwarp']
+
+    if not os.path.exists(warped_path_ext_abdomen_reg):
+        align_fish_simple_ants(reference_data_env, target_image_path_ext_abdomen_reg, \
+                               reference_image_path_ext_abdomen_reg, output_name_ext_abdomen_reg, \
+                               warped_path_ext_abdomen_reg, iwarped_path_ext_abdomen_reg, \
+                               reg_prefix=ants_prefix_ext_abdomen_reg, use_syn=True, \
+                               use_full_iters=True)
+
+        reference_data_env.save()
+        target_data_env.save()
+    else:
+        print "Extracted abdomenal part of the reference data is already registered to the extracted one of target"
+
+    print "--Transfrom labels of reference fish's extracted abdomenal part into the target's one..."
+    # Transforming labels of abdomenal part of reference fish to the abdomenal part of target one
+    ref_image_path_ext_htr = target_image_path_ext_abdomen_reg
+    transformation_path_ext_htr = ants_ext_abdomen_reg_paths['gen_affine']
+    def_transformation_path_ext_htr = ants_ext_abdomen_reg_paths['warp']
+    labels_image_path_ext_htr = abdomen_part_data_labels_volume_reference_niigz_path
+
+    test_data_ext_htr = open_data(ref_image_path_ext_htr)
+    transformation_output_ext_htr = target_data_env.get_new_volume_niigz_path(test_data_ext_htr.shape, 'zoomed_0p5_extracted_abdomen_part_labels')
+    reg_prefix_ext_htr = 'extracted_abdomen_label_deforming'
+
+    if not os.path.exists(transformation_output_ext_htr):
+        apply_transform_fish(target_data_env, ref_image_path_ext_htr, \
+                             transformation_path_ext_htr, labels_image_path_ext_htr, \
+                             transformation_output_ext_htr, \
+                             def_transformation_path=def_transformation_path_ext_htr, \
+                             reg_prefix=reg_prefix_ext_htr)
+        reference_data_env.save()
+        target_data_env.save()
+    else:
+        print "Extracted abdomenal part data is already transformed"
+
+    print "--Transfrom labels of reference fish's organs extracted abdomenal part into the target's one..."
+    #extracted_abdomen_part_separated_organs_labels_dict
+
+    reference_extracted_abdomen_part_separated_organs_labels_dict = reference_data_env.get_extracted_abdomen_part_separated_organs_labels()
+    print 'reference_extracted_abdomen_part_separated_organs_labels_dict = %s' % str(reference_extracted_abdomen_part_separated_organs_labels_dict)
+
+    print str(target_data_env.envs)
+    target_extracted_abdomen_part_separated_organs_labels_dict = target_data_env.get_extracted_abdomen_part_separated_organs_labels()
+    print 'target_extracted_abdomen_part_separated_organs_labels_dict = %s' % str(target_extracted_abdomen_part_separated_organs_labels_dict)
+
+    if not target_extracted_abdomen_part_separated_organs_labels_dict:
+        for organ_name, organ_labels in reference_extracted_abdomen_part_separated_organs_labels_dict.iteritems():
+            print '----Extracting abdomenal organ %s' % organ_name
+
+            organ_ref_image_path_ext_htr = target_image_path_ext_abdomen_reg
+            organ_transformation_path_ext_htr = ants_ext_abdomen_reg_paths['gen_affine']
+            organ_def_transformation_path_ext_htr = ants_ext_abdomen_reg_paths['warp']
+            organ_labels_image_path_ext_htr = organ_labels['zoomed']
+
+            organ_test_data_ext_htr = open_data(ref_image_path_ext_htr)
+            organ_transformation_output_ext_htr = target_data_env.get_new_volume_niigz_path(test_data_ext_htr.shape, 'zoomed_0p5_extracted_abdomen_part_organ_%s_labels' % organ_name)
+            organ_reg_prefix_ext_htr = 'extracted_abdomen_organ_%s_label_deforming' % organ_name
+
+            if not os.path.exists(organ_transformation_output_ext_htr):
+                apply_transform_fish(target_data_env, organ_ref_image_path_ext_htr, \
+                                     organ_transformation_path_ext_htr, organ_labels_image_path_ext_htr, \
+                                     organ_transformation_output_ext_htr, \
+                                     def_transformation_path=organ_def_transformation_path_ext_htr, \
+                                     reg_prefix=organ_reg_prefix_ext_htr)
+
+                target_extracted_abdomen_part_separated_organs_labels_dict[organ_name] = { 'normal': None, 'zoomed': organ_transformation_output_ext_htr }
+                target_data_env.set_extracted_abdomen_part_separated_organs_labels(target_extracted_abdomen_part_separated_organs_labels_dict)
+
+                reference_data_env.save()
+                target_data_env.save()
+            else:
+                print "Extracted abdomenal organ '%s' part data is already transformed" % organ_name
+
+    reference_data_env.save()
+    target_data_env.save()
+
+    print 'reference_extracted_abdomen_part_separated_organs_labels_dict = %s' % str(reference_extracted_abdomen_part_separated_organs_labels_dict)
+    print 'target_extracted_abdomen_part_separated_organs_labels_dict = %s' % str(target_extracted_abdomen_part_separated_organs_labels_dict)
+
+def split_fish_body(input_data_path, input_data_label_path, output_name, \
+               wokring_env, separation_overlap=5, zoom_key='zoomed'):
+    input_data = open_data(input_data_path)
+    input_data_labels = open_data(input_data_label_path)
+
+    separation_pos, abdomen_label_full_volume, head_label_full_volume = find_separation_pos(input_data_labels)
+
+    abdomen_data, head_data = split_fish_by_pos(input_data, separation_pos, overlap=separation_overlap)
+    abdomen_data_label, _ = split_fish_by_pos(abdomen_label_full_volume, separation_pos, overlap=separation_overlap)
+    _, head_data_label = split_fish_by_pos(head_label_full_volume, separation_pos, overlap=separation_overlap)
+
+    abdomen_data_niigz_path = wokring_env.get_new_volume_niigz_path(abdomen_data.shape, \
+                                        '_'.join([zoom_key, output_name, 'abdomen']))
+    if True:
+    #if not os.path.exists(abdomen_data_niigz_path):
+        save_as_nifti(abdomen_data, abdomen_data_niigz_path)
+
+    head_data_niigz_path = wokring_env.get_new_volume_niigz_path(head_data.shape, \
+                                        '_'.join([zoom_key, output_name, 'head']))
+    if True:
+    #if not os.path.exists(head_data_niigz_path):
+        save_as_nifti(head_data, head_data_niigz_path)
+
+    abdomen_data_label_niigz_path = wokring_env.get_new_volume_niigz_path(abdomen_data_label.shape, \
+                                        '_'.join([zoom_key, output_name, 'abdomen', 'label']))
+    if True:
+    #if not os.path.exists(abdomen_data_label_niigz_path):
+        save_as_nifti(abdomen_data_label, abdomen_data_label_niigz_path)
+
+    head_data_label_niigz_path = wokring_env.get_new_volume_niigz_path(head_data_label.shape, \
+                                        '_'.join([zoom_key, output_name, 'head', 'label']))
+    if True:
+    #if not os.path.exists(head_data_label_niigz_path):
+        save_as_nifti(head_data_label, head_data_label_niigz_path)
+
+    wokring_env.save()
+
+    return abdomen_data_niigz_path, abdomen_data_label_niigz_path, \
+           head_data_niigz_path, head_data_label_niigz_path
+
+def extract_largest_label_by_name(data_path, data_label_path, output_name, working_env, bb_side_offset=5, label_name='brain'):
+    data_label = open_data(data_label_path)
+
+    brain_data_label = extract_label_by_name(data_label, label_name='brain')
+
+    brain_data_label_niigz_path = \
+            working_env.get_new_volume_niigz_path(brain_data_label.shape, \
+                                '_'.join([label_name, 'label']))
+
+    if True:
+    #if not os.path.exists(brain_data_label_niigz_path):
+        save_as_nifti(brain_data_label, brain_data_label_niigz_path)
+
+    return extract_largest_label(data_path, \
+                                 brain_data_label_niigz_path, \
+                                 output_name, \
+                                 working_env, \
+                                 bb_side_offset=bb_side_offset)
+
+def extract_largest_label(data_path, data_label_path, output_name, working_env, bb_side_offset=5):
+    data = open_data(data_path)
+    data_label = open_data(data_label_path)
+
+    extracted_data_volume, extracted_data_volume_bbox = \
+            extract_largest_volume_by_label(data, data_label, bb_side_offset=bb_side_offset)
+
+    extracted_data_volume_labels = data_label[extracted_data_volume_bbox]
+
+    extracted_data_volume_niigz_path = \
+        working_env.get_new_volume_niigz_path(extracted_data_volume.shape, output_name)
+
+    extracted_data_volume_labels_niigz_path = \
+        working_env.get_new_volume_niigz_path(extracted_data_volume_labels.shape, \
+                '_'.join([output_name, 'label']))
+
+    if True:
+    #if not os.path.exists(extracted_data_volume_niigz_path):
+        save_as_nifti(extracted_data_volume, extracted_data_volume_niigz_path)
+
+    if True:
+    #if not os.path.exists(extracted_data_volume_labels_niigz_path):
+        save_as_nifti(extracted_data_volume_labels, extracted_data_volume_labels_niigz_path)
+
+    working_env.save()
+
+    return extracted_data_volume_niigz_path, \
+           extracted_data_volume_labels_niigz_path, \
+           extracted_data_volume_bbox
+
+"""
+Organs --
+        |
+        Organs specific set #1--
+        |                      |
+        |                    Organ #1--- Data
+        |                           |        |
+        |                           |        'normal': path
+        |                           |        'zoomed': path
+        |                           ---- Labels
+        |                           |          |
+        |                           |          'normal': path
+        |                           |          'zoomed': path
+        |                           ---- Bbox
+        |                                      |
+        |                                      'normal': path
+        |                                      'zoomed': path
+
+"""
+
+def update_organs_envs(working_env, env_output_name, organ_name, \
+                       data_type_key, zoom_key, path, bbox_key='bbox', bbox=None):
+    organs_envs = working_env.get_organs_envs()
+
+    empty_data_dict = { 'data':  {'normal':None, 'zoomed': None }, \
+                        'label': {'normal':None, 'zoomed': None }, \
+                        'bbox':  {'normal':None, 'zoomed': None } }
+
+    if env_output_name in organs_envs:
+        if organ_name in organs_envs[env_output_name]:
+            if not isinstance(organs_envs[env_output_name][organ_name], dict):
+                raise ValueError("""Organs data dictionary contains organ entry
+                                which is not dictionary.""")
+        else:
+            organs_envs[env_output_name][organ_name] = empty_data_dict
+    else:
+        organs_envs[env_output_name] = { organ_name: empty_data_dict }
+
+    organs_envs[env_output_name][organ_name][data_type_key][zoom_key] = path
+    organs_envs[env_output_name][organ_name][bbox_key][zoom_key] = bbox
+
+    working_env.set_organs_envs(organs_envs)
+    working_env.save()
+
+def split_fish_organs(input_organs_env_name, \
+                      output_organs_env_name, \
+                      input_data_labels_path, \
+                      input_data_path, \
+                      working_env, \
+                      zoom_key, \
+                      overlap=20):
+    aligned_data_labels = open_data(input_data_labels_path)
+    organ_separation_pos, _, _ = find_separation_pos(aligned_data_labels)
+
+    input_data = open_data(input_data_path)
+
+    abdomen_data, _ = split_fish_by_pos(input_data, organ_separation_pos, overlap=overlap)
+    # print "\033[1;31m abdomen_data.shape = %s \033[0m" % str(abdomen_data.shape)
+
+    abdomen_data_niigz_path = \
+                working_env.get_new_volume_niigz_path(abdomen_data.shape, \
+                        ORGAN_DATA_TEMPLATE % (output_organs_env_name, 'general'))
+
+    organs_envs = working_env.get_organs_envs()
+
+    # print "\033[1;31m Input data = %s \033[0m" % working_env.envs['zoomed_0p5_extracted_input_data_path_niigz']
+    # print "\033[1;31m organs_envs = %s \033[0m" % str(organs_envs)
+
+    if input_organs_env_name in organs_envs:
+        input_organs = organs_envs[input_organs_env_name]
+
+        for organ_name, organ_data_dict in input_organs.iteritems():
+            organ_data_label_path = organ_data_dict['label'][zoom_key]
+            organ_data_label = open_data(organ_data_label_path)
+
+            abdomen_data_label_organ, _ = split_fish_by_pos(organ_data_label, organ_separation_pos, overlap=overlap)
+            print "\033[1;31m abdomen_data_label_organ.shape = %s \033[0m" % str(abdomen_data_label_organ.shape)
+
+            abdomen_data_label_organ_niigz_path = \
+                    working_env.get_new_volume_niigz_path(abdomen_data_label_organ.shape, \
+                            ORGAN_LABEL_TEMPLATE % (output_organs_env_name, organ_name))
+            if True:
+            #if not os.path.exists(abdomen_data_label_organ_niigz_path):
+                save_as_nifti(abdomen_data_label_organ, abdomen_data_label_organ_niigz_path)
+
+                if True:
+                #if not os.path.exists(abdomen_data_niigz_path):
+                    save_as_nifti(abdomen_data, abdomen_data_niigz_path)
+
+                update_organs_envs(working_env, \
+                                   output_organs_env_name, \
+                                   organ_name, \
+                                   'label', \
+                                   zoom_key, \
+                                   abdomen_data_label_organ_niigz_path)
+
+                update_organs_envs(working_env, \
+                                   output_organs_env_name, \
+                                   organ_name, \
+                                   'data', \
+                                   zoom_key, \
+                                   abdomen_data_niigz_path)
+
+    # print "\033[1;31m working_env.get_organs_envs() = %s \033[0m" % str(working_env.get_organs_envs()[output_organs_env_name])
+
+    return output_organs_env_name
+
+def extract_organs_by_bbox(input_organs_env_name, \
+                           output_organs_env_name, \
+                           extraction_bbox, working_env, \
+                           zoom_key, save_label=True):
+    organs_envs = working_env.get_organs_envs()
+
+    print 'organs_envs = %s' % str(organs_envs)
+
+    if input_organs_env_name in organs_envs:
+        input_organs = organs_envs[input_organs_env_name]
+
+        for organ_name, organ_data_dict in input_organs.iteritems():
+            organ_data_path = organ_data_dict['data'][zoom_key]
+            organ_data = open_data(organ_data_path)
+
+            print "\033[1;31m organ_data.shape = %s \033[0m" % str(organ_data.shape)
+            print "\033[1;31m extraction_bbox = %s \033[0m" % str(extraction_bbox)
+            extracted_organ_data_volume = organ_data[extraction_bbox]
+            print "\033[1;31m extracted_organ_data_volume = %s \033[0m" % str(extracted_organ_data_volume.shape)
+
+            extracted_organ_data_volume_niigz_path = \
+                    working_env.get_new_volume_niigz_path(extracted_organ_data_volume.shape, \
+                        ORGAN_DATA_TEMPLATE % (output_organs_env_name, organ_name))
+
+
+            if save_label:
+                organ_data_label_path = organ_data_dict['label'][zoom_key]
+                organ_data_label = open_data(organ_data_label_path)
+
+                extracted_organ_data_label_volume = organ_data_label[extraction_bbox]
+
+                extracted_organ_data_label_volume_niigz_path = \
+                    working_env.get_new_volume_niigz_path(extracted_organ_data_label_volume.shape, \
+                        ORGAN_LABEL_TEMPLATE % (output_organs_env_name, organ_name))
+
+                if extracted_organ_data_label_volume_niigz_path is not None:
+                    if True:
+                    #if not os.path.exists(extracted_organ_data_label_volume_niigz_path):
+                        save_as_nifti(extracted_organ_data_label_volume, extracted_organ_data_label_volume_niigz_path)
+
+                        update_organs_envs(working_env, output_organs_env_name, \
+                                           organ_name, 'label', zoom_key, \
+                                           extracted_organ_data_label_volume_niigz_path, \
+                                           bbox=pickle.dumps(extraction_bbox))
+
+            if True:
+            #if not os.path.exists(extracted_organ_data_volume_niigz_path):
+                save_as_nifti(extracted_organ_data_volume, extracted_organ_data_volume_niigz_path)
+
+                update_organs_envs(working_env, output_organs_env_name, \
+                                   organ_name, 'data', zoom_key, \
+                                   extracted_organ_data_volume_niigz_path, \
+                                   bbox=pickle.dumps(extraction_bbox))
+
+    return output_organs_env_name
+
+def extract_organs_by_labels(input_organs_env_name, \
+                             output_organs_env_name, \
+                             working_env, \
+                             zoom_key, \
+                             save_label=True, \
+                             bb_side_offset=10):
+    #if True:
+    organs_envs = working_env.get_organs_envs()
+
+    if input_organs_env_name in organs_envs:
+        input_organs = organs_envs[input_organs_env_name]
+
+        for organ_name, organ_data_dict in input_organs.iteritems():
+            organ_data_label_path = organ_data_dict['label'][zoom_key]
+            organ_data_label = open_data(organ_data_label_path)
+
+            organ_data_path = organ_data_dict['data'][zoom_key]
+            organ_data = open_data(organ_data_path)
+
+            extracted_organ_data_volume, extracted_organ_bbox = extract_largest_volume_by_label(organ_data, organ_data_label, bb_side_offset=bb_side_offset)
+
+            extracted_organ_data_volume_niigz_path = \
+                    working_env.get_new_volume_niigz_path(extracted_organ_data_volume.shape, \
+                        ORGAN_DATA_TEMPLATE % (output_organs_env_name, organ_name))
+
+
+            if True:
+            #if not os.path.exists(extracted_organ_data_volume_niigz_path):
+                save_as_nifti(extracted_organ_data_volume, extracted_organ_data_volume_niigz_path)
+
+                update_organs_envs(working_env, output_organs_env_name, \
+                                   organ_name, 'data', zoom_key, \
+                                   extracted_organ_data_volume_niigz_path, \
+                                   bbox=pickle.dumps(extracted_organ_bbox))
+
+            if save_label:
+                extracted_organ_data_label_volume = organ_data_label[extracted_organ_bbox]
+
+                extracted_organ_data_label_volume_niigz_path = \
+                        working_env.get_new_volume_niigz_path(extracted_organ_data_label_volume.shape, \
+                            ORGAN_LABEL_TEMPLATE % (output_organs_env_name, organ_name))
+
+                if extracted_organ_data_label_volume_niigz_path is not None:
+                    if True:
+                    #if not os.path.exists(extracted_organ_data_label_volume_niigz_path):
+                        save_as_nifti(extracted_organ_data_label_volume, extracted_organ_data_label_volume_niigz_path)
+
+                        update_organs_envs(working_env, output_organs_env_name, \
+                                           organ_name, 'label', zoom_key, \
+                                           extracted_organ_data_label_volume_niigz_path, \
+                                           bbox=pickle.dumps(extracted_organ_bbox))
+
+    return output_organs_env_name
+
+def register_data(reference_data_path, target_data_path, reference_env, \
+                  prefix_name, use_full_iters=True, use_syn=True, \
+                  num_threads=24):
+    registration_paths = reference_env.get_aligned_data_paths(prefix_name)
+
+    output_name_reg = registration_paths['out_name']
+    warped_path_reg = registration_paths['warped']
+    iwarped_path_reg = registration_paths['iwarp']
+
+    #if True:
+    if not os.path.exists(warped_path_reg):
+        align_fish_simple_ants(reference_env, target_data_path, reference_data_path, \
+                               output_name_reg, warped_path_reg, iwarped_path_reg, \
+                               reg_prefix=prefix_name, use_syn=use_syn, \
+                               use_full_iters=use_full_iters, \
+                               num_threads=num_threads)
+
+        reference_env.save()
+    else:
+        print "Reference data (%s) is already registered to the extracted one " \
+        "of target." % prefix_name
+
+    return prefix_name
+
+def transform_data(reference_data_label_path, target_data_path, \
+                   registration_prefix_name, output_name, \
+                   reference_env, target_env, \
+                   reg_prefix=None):
+    registration_paths = reference_env.get_aligned_data_paths(registration_prefix_name)
+
+    affine_transformation_path = registration_paths['gen_affine']
+    def_transformation_path = registration_paths['warp']
+
+    target_data = open_data(target_data_path)
+
+    transformation_output_path = \
+            target_env.get_new_volume_niigz_path(target_data.shape, \
+                    '_'.join([output_name, 'label']))
+
+    #if True:
+    if not os.path.exists(transformation_output_path):
+        apply_transform_fish(target_env, target_data_path, \
+                             affine_transformation_path, \
+                             reference_data_label_path, \
+                             transformation_output_path, \
+                             def_transformation_path=def_transformation_path, \
+                             reg_prefix=reg_prefix)
+        reference_env.save()
+        target_env.save()
+    else:
+        print "Extracted abdomenal part data is already transformed"
+
+    return transformation_output_path
+
+def transform_organs_data(reference_organs_env_name, target_data_path, \
+                          zoom_key, registration_prefix_name, \
+                          output_organs_env_name, reference_env, target_env):
+    reference_organs_envs = reference_env.get_organs_envs()
+
+    if reference_organs_env_name in reference_organs_envs:
+        reference_input_organs = reference_organs_envs[reference_organs_env_name]
+
+        for organ_name in reference_input_organs.keys():
+            reference_organ_data_label_path = reference_input_organs[organ_name]['label'][zoom_key]
+
+            target_organ_data_label_path = \
+                    transform_data(reference_organ_data_label_path, \
+                                   target_data_path, \
+                                   registration_prefix_name, \
+                                   ORGAN_LABEL_TEMPLATE % (output_organs_env_name, organ_name), \
+                                   reference_env, \
+                                   target_env)
+
+            update_organs_envs(target_env, output_organs_env_name, organ_name, \
+                               'label', zoom_key, target_organ_data_label_path)
+            update_organs_envs(target_env, output_organs_env_name, organ_name, \
+                               'data', zoom_key, target_data_path)
+
+    else:
+        raise ValueError('Reference or target evironment name is not correct')
+
+    return output_organs_env_name
+
+def complete_organs_to_full_volume(input_organs_env_name, output_organs_env_name, \
+                                   abdomed_part_path, head_part_path, \
+                                   abdomen_local_part_path, abdomen_local_part_bbox, \
+                                   input_data_path, working_env, zoom_key, \
+                                   separation_overlap=1, body_part='head'):
+    organs_envs = working_env.get_organs_envs()
+
+    if input_organs_env_name in organs_envs:
+        input_organs = organs_envs[input_organs_env_name]
+
+        for organ_name, organ_data_dict in input_organs.iteritems():
+            organ_data_label_path = organ_data_dict['label'][zoom_key]
+
+            extracted_organ_data_label_bbox = None
+            if organ_data_dict['bbox'][zoom_key] is not None:
+                extracted_organ_data_label_bbox = pickle.loads(organ_data_dict['bbox'][zoom_key])
+            else:
+                raise ValueError("Organ's %s bounding box is mot specified." % organ_name)
+
+            completed_organ_data_label = \
+                        complete_data_to_full_volume(abdomed_part_path, \
+                                                     head_part_path, \
+                                                     organ_data_label_path, \
+                                                     extracted_organ_data_label_bbox, \
+                                                     abdomen_local_part_path=abdomen_local_part_path, \
+                                                     abdomen_local_part_bbox=abdomen_local_part_bbox, \
+                                                     separation_overlap=separation_overlap, \
+                                                     body_part=body_part)
+
+            completed_organ_data_label_niigz_path = \
+                        working_env.get_new_volume_niigz_path(completed_organ_data_label.shape, \
+                                ORGAN_LABEL_TEMPLATE % (output_organs_env_name, organ_name))
+
+            #if True:
+            if not os.path.exists(completed_organ_data_label_niigz_path):
+                save_as_nifti(completed_organ_data_label, completed_organ_data_label_niigz_path)
+
+                update_organs_envs(working_env, output_organs_env_name, \
+                                   organ_name, 'label', zoom_key, \
+                                   completed_organ_data_label_niigz_path)
+
+                update_organs_envs(working_env, output_organs_env_name, \
+                                   organ_name, 'data', zoom_key, \
+                                   input_data_path)
+            else:
+                print "The target fish's organ %s label is already completed to the input volume size." % organ_name
+
+    return output_organs_env_name
+
+def complete_fish_to_full_volume(abdomed_part_path, \
+                                 head_part_path, \
+                                 extracted_organ_volume_path, \
+                                 extracted_organ_volume_bbox, \
+                                 working_env, \
+                                 abdomen_local_part_path=None, \
+                                 abdomen_local_part_bbox=None, \
+                                 separation_overlap=1, \
+                                 body_part='head'):
+    completed_data_label = \
+            complete_data_to_full_volume(abdomed_part_path, \
+                                         head_part_path, \
+                                         extracted_organ_volume_path, \
+                                         extracted_organ_volume_bbox, \
+                                         abdomen_local_part_path=abdomen_local_part_path, \
+                                         abdomen_local_part_bbox=abdomen_local_part_bbox, \
+                                         separation_overlap=separation_overlap, \
+                                         body_part=body_part)
+
+    completed_data_label_niigz_path = \
+            working_env.get_new_volume_niigz_path(completed_data_label.shape, \
+                    "_".join(["completed"]))
+
+    #if True:
+    if not os.path.exists(completed_data_label_niigz_path):
+        save_as_nifti(completed_data_label, completed_data_label_niigz_path)
+
+    return completed_data_label_niigz_path
+
+def upscale_organs_labels(input_organs_env_name, output_organs_env_name, \
+                          input_data_original_path, working_env, zoom_key, \
+                          new_zoom_key):
+    organs_envs = working_env.get_organs_envs()
+
+    if input_organs_env_name in organs_envs:
+        input_organs = organs_envs[input_organs_env_name]
+
+        for organ_name, organ_data_dict in input_organs.iteritems():
+            organ_data_label_path = organ_data_dict['label'][zoom_key]
+
+            input_data_original = open_data(input_data_original_path)
+
+            upscaled_organ_data_label_niigz_path = \
+                        working_env.get_new_volume_niigz_path(input_data_original.shape, \
+                            ORGAN_LABEL_TEMPLATE % (output_organs_env_name, organ_name))
+
+            #if True:
+            if not os.path.exists(upscaled_organ_data_label_niigz_path):
+                upscaled_organ_data_label = scale_to_size(input_data_original_path, \
+                                                          organ_data_label_path, \
+                                                          scale=2.0, \
+                                                          order=0)
+                save_as_nifti(upscaled_organ_data_label, upscaled_organ_data_label_niigz_path)
+
+                update_organs_envs(working_env, output_organs_env_name, \
+                                   organ_name, 'label', new_zoom_key, \
+                                   upscaled_organ_data_label_niigz_path)
+
+                update_organs_envs(working_env, output_organs_env_name, \
+                                   organ_name, 'data', new_zoom_key, \
+                                   input_data_original_path)
+
+            else:
+                print "The target fish's organ %s label is already upscaled to the input volume size." % organ_name
+
+    return output_organs_env_name
+
+def upscale_fish_label(input_data_original_path, \
+                       zoomed_data_label_path, \
+                       working_env, \
+                       output_name):
+    input_data_original = open_data(input_data_original_path)
+
+    upscaled_data_label_niigz_path = \
+            working_env.get_new_volume_niigz_path(input_data_original.shape, \
+                    '_'.join([output_name, 'label']))
+
+    #if True:
+    if not os.path.exists(upscaled_data_label_niigz_path):
+        upscaled_data_label = scale_to_size(input_data_original_path, \
+                                            zoomed_data_label_path, \
+                                            scale=2.0, \
+                                            order=0)
+        save_as_nifti(upscaled_data_label, upscaled_data_label_niigz_path)
+    else:
+        print "The data '%s' is already upscaled." % zoomed_data_label_path
+
+    return upscaled_data_label_niigz_path
+
+def segment_organs_by_labels(input_organs_env_name, \
+                             output_organs_env_name, \
+                             working_env, \
+                             zoom_key):
+    #if True:
+    organs_envs = working_env.get_organs_envs()
+
+    if input_organs_env_name in organs_envs:
+        input_organs = organs_envs[input_organs_env_name]
+
+        for organ_name, organ_data_dict in input_organs.iteritems():
+            organ_data_label_path = organ_data_dict['label'][zoom_key]
+            organ_data_label = open_data(organ_data_label_path)
+
+            organ_data_path = organ_data_dict['data'][zoom_key]
+            organ_data = open_data(organ_data_path)
+
+            segmented_organ_data = organ_data * organ_data_label
+
+            segmented_organ_data_niigz_path = \
+                    working_env.get_new_volume_niigz_path(segmented_organ_data.shape, \
+                        ORGAN_DATA_TEMPLATE % (output_organs_env_name, organ_name))
+
+
+            #if True:
+            if not os.path.exists(segmented_organ_data_niigz_path):
+                save_as_nifti(segmented_organ_data, segmented_organ_data_niigz_path)
+
+                update_organs_envs(working_env, output_organs_env_name, \
+                                   organ_name, 'label', zoom_key, \
+                                   organ_data_label_path)
+
+                update_organs_envs(working_env, output_organs_env_name, \
+                                   organ_name, 'data', zoom_key, \
+                                   segmented_organ_data_niigz_path)
+
+    return output_organs_env_name
+
+def segment_data_by_labels(input_data_path, \
+                           input_data_label_path, \
+                           working_env, \
+                           output_name):
+    print 'input_data_path = %s' % input_data_path
+    print 'input_data_label_path = %s' % input_data_label_path
+
+    input_data = open_data(input_data_path)
+    input_data_label = open_data(input_data_label_path)
+
+    segmented_data = input_data * input_data_label
+
+    segmented_data_niigz_path = \
+            working_env.get_new_volume_niigz_path(segmented_data.shape, \
+                    '_'.join([output_name, 'segmented']))
+
+    #if True:
+    if not os.path.exists(segmented_data_niigz_path):
+        save_as_nifti(segmented_data, segmented_data_niigz_path)
+
+    return segmented_data_niigz_path
+
+def spine_segmentation(reference_env, \
+                       target_env, \
+                       min_area=20.0, \
+                       min_circularity=0.5, \
+                       com_dist_tolerance=5, \
+                       zoom_level=2, \
+                       min_zoom_level=2, \
+                       organs_labels = ['heart']):
+    reference_env.load()
+    target_env.load()
+
+    print "--Aligning and volumes' extraction"
+    reference_data_results = initialize_env(reference_env, \
+                                            zoom_level=zoom_level, \
+                                            min_zoom_level=min_zoom_level, \
+                                            organs_labels=organs_labels)
+
+    target_data_results = initialize_env(target_env, \
+                                         zoom_level=zoom_level, \
+                                         min_zoom_level=min_zoom_level)
+
+    reference_env.save()
+    target_env.save()
+
+    reference_original_input_data_path = reference_env.envs['extracted_input_data_path_niigz']
+    reference_original_input_data_labels_path = reference_env.envs['extracted_input_data_labels_path_niigz']
+
+    reference_input_data_path = reference_env.envs['zoomed_0p5_extracted_input_data_path_niigz']
+    reference_input_data_labels_path = reference_env.envs['zoomed_0p5_extracted_input_data_labels_path_niigz']
+
+    target_original_input_data_path = target_env.envs['extracted_input_data_path_niigz']
+    target_input_data_path = target_env.envs['zoomed_0p5_extracted_input_data_path_niigz']
+
+    print  "--Registration of the reference fish to the target one"
+    parts_separation_prefix = \
+                register_data(reference_input_data_path, \
+                              target_input_data_path, \
+                              reference_env, \
+                              "full_volume_registration_approx", \
+                              use_full_iters=False, \
+                              use_syn=True)
+
+    print "--Transforming brain and abdomen labels of the reference fish to the target's one"
+    target_input_data_labels_approx_path = \
+                transform_data(reference_input_data_labels_path, \
+                               target_input_data_path, \
+                               parts_separation_prefix, \
+                               "full_volume_label_deformation", \
+                               reference_env, \
+                               target_env)
+
+    print  "--Segment target spinal cord"
+    target_filled_spine_label_niigz_path = \
+                run_spine_segmentation(target_input_data_path, \
+                                       target_input_data_labels_approx_path, \
+                                       target_env, \
+                                       "spine", \
+                                       min_area=min_area, \
+                                       min_circularity=min_circularity, \
+                                       tolerance=com_dist_tolerance)
+
+    print  "--Segment reference spinal cord"
+    reference_filled_spine_label_niigz_path = \
+                run_spine_segmentation(reference_input_data_path, \
+                                       reference_input_data_labels_path, \
+                                       reference_env, \
+                                       "spine", \
+                                       min_area=min_area, \
+                                       min_circularity=min_circularity, \
+                                       tolerance=com_dist_tolerance)
+
+    print "--Segment target fish's spine data..."
+    if target_filled_spine_label_niigz_path is not None:
+        target_filled_spine_segmented_niigz_path = \
+                        segment_data_by_labels(target_input_data_path, \
+                                               target_filled_spine_label_niigz_path, \
+                                               target_env, \
+                                               "spine_data")
+
+    print "--Segment reference fish's spine data..."
+    if reference_filled_spine_label_niigz_path is not None:
+        reference_filled_spine_segmented_niigz_path = \
+                        segment_data_by_labels(reference_input_data_path, \
+                                               reference_filled_spine_label_niigz_path, \
+                                               reference_env, \
+                                               "spine_data")
+
+def brain_segmentation_ants_v2(reference_env, \
+                               target_env, \
+                               bb_side_offset = 2, \
+                               separation_overlap = 2, \
+                               zoom_level=2, \
+                               min_zoom_level=2, \
+                               organs_labels = []):
+
+    reference_env.load()
+    target_env.load()
+
+    print "--Aligning and volumes' extraction"
+    reference_data_results = initialize_env(reference_env, \
+                                            zoom_level=zoom_level, \
+                                            min_zoom_level=min_zoom_level, \
+                                            organs_labels=organs_labels)
+
+    target_data_results = initialize_env(target_env, \
+                                         zoom_level=zoom_level, \
+                                         min_zoom_level=min_zoom_level)
+
+    reference_env.save()
+    target_env.save()
+
+    reference_original_input_data_path = reference_env.envs['extracted_input_data_path_niigz']
+    reference_original_input_data_labels_path = reference_env.envs['extracted_input_data_labels_path_niigz']
+
+    reference_input_data_path = reference_env.envs['zoomed_0p5_extracted_input_data_path_niigz']
+    reference_input_data_labels_path = reference_env.envs['zoomed_0p5_extracted_input_data_labels_path_niigz']
+
+    target_original_input_data_path = target_env.envs['extracted_input_data_path_niigz']
+    target_input_data_path = target_env.envs['zoomed_0p5_extracted_input_data_path_niigz']
+
+    # reference_original_input_data_path = reference_data_results['extracted']
+    # reference_original_input_data_labels_path = reference_data_results['extracted_labels']
+    #
+    # reference_input_data_path = reference_data_results['scaled_0p5_extracted']
+    # reference_input_data_labels_path = reference_data_results['scaled_0p5_extracted_labels']
+    #
+    # target_original_input_data_path = target_data_results['extracted']
+    # target_input_data_path = target_data_results['scaled_0p5_extracted']
+
+    print reference_original_input_data_path
+    print reference_original_input_data_labels_path
+    print reference_input_data_path
+    print reference_input_data_labels_path
+    print target_original_input_data_path
+    print target_input_data_path
+
+    print  "--Registration of the reference fish to the target one"
+    parts_separation_prefix = \
+                register_data(reference_input_data_path, \
+                              target_input_data_path, \
+                              reference_env, \
+                              "full_volume_registration_approx", \
+                              use_full_iters=False, \
+                              use_syn=True)
+
+    print "--Transforming brain and abdomen labels of the reference fish to the target's one"
+    target_input_data_labels_approx_path = \
+                transform_data(reference_input_data_labels_path, \
+                               target_input_data_path, \
+                               parts_separation_prefix, \
+                               "full_volume_label_deformation", \
+                               reference_env, \
+                               target_env)
+
+    print "--Fish separation (reference image)..."
+    reference_abdomen_data_niigz_path, \
+    reference_abdomen_data_label_niigz_path, \
+    reference_head_data_niigz_path, \
+    reference_head_data_label_niigz_path = \
+                split_fish_body(reference_input_data_path, \
+                                reference_input_data_labels_path, \
+                                "separated", \
+                                reference_env, \
+                                separation_overlap=separation_overlap, \
+                                zoom_key='zoomed')
+
+    print "--Fish separation (target image)..."
+    target_abdomen_data_niigz_path, \
+    target_abdomen_data_label_niigz_path, \
+    target_head_data_niigz_path, \
+    target_head_data_label_niigz_path = \
+                split_fish_body(target_input_data_path, \
+                                target_input_data_labels_approx_path, \
+                                "separated", \
+                                target_env, \
+                                separation_overlap=separation_overlap, \
+                                zoom_key='zoomed')
+
+    print "--Register reference fish's head to the target's one..."
+    head_registration_prefix = \
+                register_data(reference_head_data_niigz_path, \
+                              target_head_data_niigz_path, \
+                              reference_env, \
+                              "head_registration", \
+                              use_full_iters=False, \
+                              use_syn=True)
+
+    print "--Transfrom labels of reference fish's head into the target's one..."
+    target_head_data_label_approx_path = \
+                transform_data(reference_head_data_label_niigz_path, \
+                               target_head_data_niigz_path, \
+                               head_registration_prefix, \
+                               "head_label_deformation", \
+                               reference_env, \
+                               target_env)
+
+    print "--Extract the reference fish's brain using labels..."
+    reference_extracted_brain_niigz_path, \
+    reference_extracted_brain_label_niigz_path, \
+    reference_extracted_brain_bbox = \
+                extract_largest_label(reference_head_data_niigz_path, \
+                                      reference_head_data_label_niigz_path, \
+                                      "extracted_brain", \
+                                      reference_env, \
+                                      bb_side_offset=bb_side_offset)
+
+    print "--Extract the target fish's brain using transformed head labels..."
+    target_extracted_brain_niigz_path, \
+    target_extracted_brain_label_niigz_path, \
+    target_extracted_brain_bbox = \
+                extract_largest_label(target_head_data_niigz_path, \
+                                      target_head_data_label_approx_path, \
+                                      "extracted_brain_approx_location", \
+                                      target_env, \
+                                      bb_side_offset=bb_side_offset)
+
+    print "--Register the reference fish's brain to the target's one..."
+    brain_registration_prefix = \
+                register_data(reference_extracted_brain_niigz_path, \
+                              target_extracted_brain_niigz_path, \
+                              reference_env, \
+                              "brain_registration", \
+                              use_full_iters=True, \
+                              use_syn=True)
+
+    print "--Transform the reference fish's brain labels into the target's one..."
+    target_extracted_brain_label_approx_path = \
+                transform_data(reference_extracted_brain_label_niigz_path, \
+                               target_extracted_brain_niigz_path, \
+                               brain_registration_prefix, \
+                               "extracted_brain", \
+                               reference_env, \
+                               target_env)
+
+    print "--Complete the target fish's brain labels to full volume..."
+    target_completed_data_label_path = \
+                complete_fish_to_full_volume(target_abdomen_data_label_niigz_path, \
+                                             target_head_data_label_niigz_path, \
+                                             target_extracted_brain_label_approx_path, \
+                                             target_extracted_brain_bbox, \
+                                             target_env, \
+                                             separation_overlap=separation_overlap, \
+                                             body_part='head')
+
+    print "--Upscale the initial aligned completed target fish's brain labels to the input volume size..."
+    target_upscaled_completed_data_label_path = \
+                upscale_fish_label(target_original_input_data_path, \
+                                   target_completed_data_label_path, \
+                                   target_env, \
+                                   "upscaled_data")
+
+    print "--Extract the target fish's brain labels from the upscaled initial volume..."
+    target_extracted_upscaled_brain_niigz_path, \
+    target_extracted_upscaled_brain_label_niigz_path, \
+    target_extracted_upscaled_brain_bbox = \
+                extract_largest_label(target_original_input_data_path, \
+                                      target_upscaled_completed_data_label_path, \
+                                      "extracted_upscaled_brain", \
+                                      target_env, \
+                                      bb_side_offset=bb_side_offset)
+
+    print "--Extract the reference fish's brain labels from the original volume..."
+    reference_extracted_original_brain_niigz_path, \
+    reference_extracted_original_brain_label_niigz_path, \
+    reference_extracted_original_brain_bbox = \
+                extract_largest_label_by_name(reference_original_input_data_path, \
+                                              reference_original_input_data_labels_path, \
+                                              "extracted_original_brain", \
+                                              reference_env, \
+                                              bb_side_offset=bb_side_offset, \
+                                              label_name='brain')
+
+    print "--Segment upscaled target fish's brain data..."
+    target_extracted_upscaled_segmented_brain_niigz_path = \
+                        segment_data_by_labels(target_extracted_upscaled_brain_niigz_path, \
+                                               target_extracted_upscaled_brain_label_niigz_path, \
+                                               target_env, \
+                                               "brain")
+
+    print "--Segment original reference fish's brain data..."
+    reference_extracted_original_segmented_brain_niigz_path = \
+                        segment_data_by_labels(reference_extracted_original_brain_niigz_path, \
+                                               reference_extracted_original_brain_label_niigz_path, \
+                                               reference_env, \
+                                               "brain")
+
+@timing
+def gather_volume_statistics(reference_env, \
+                             target_env, \
+                             zoom_level=2, \
+                             min_zoom_level=2, \
+                             organs_labels = []):
+
+    print "##################################################################################"
+    print "######################### Gathering statistics has started #########################"
+    print "##################################################################################"
+
+    reference_env.load()
+    target_env.load()
+
+    print "--Aligning and volumes' extraction"
+    reference_data_results = initialize_env(reference_env, \
+                                            zoom_level=zoom_level, \
+                                            min_zoom_level=min_zoom_level, \
+                                            organs_labels=organs_labels)
+
+    target_data_results = initialize_env(target_env, \
+                                         zoom_level=zoom_level, \
+                                         min_zoom_level=min_zoom_level)
+
+    reference_env.save()
+    target_env.save()
+
+    generate_stats(reference_env)
+    generate_stats(target_env)
+
+@timing
+def organs_segmentation_ants(reference_env, \
+                             target_env, \
+                             bb_side_offset=2, \
+                             separation_overlap=5, \
+                             zoom_level=2, \
+                             min_zoom_level=2, \
+                             organs_labels = ['heart']):
+
+    print "##################################################################################"
+    print "######################### Organ segmentation has started #########################"
+    print "##################################################################################"
+
+    reference_env.load()
+    target_env.load()
+
+    print "--Aligning and volumes' extraction"
+    reference_data_results = initialize_env(reference_env, \
+                                            zoom_level=zoom_level, \
+                                            min_zoom_level=min_zoom_level, \
+                                            organs_labels=organs_labels)
+
+    target_data_results = initialize_env(target_env, \
+                                         zoom_level=zoom_level, \
+                                         min_zoom_level=min_zoom_level)
+
+    reference_env.save()
+    target_env.save()
+
+    reference_input_aligned_data_path = reference_env.envs['zoomed_0p5_extracted_input_data_path_niigz']
+    reference_input_aligned_data_label_path = reference_env.envs['zoomed_0p5_extracted_input_data_labels_path_niigz']
+
+    target_input_aligned_data_path = target_env.envs['zoomed_0p5_extracted_input_data_path_niigz']
+
+    print  "--Registration of the reference fish to the target one"
+    parts_separation_prefix = \
+                register_data(reference_input_aligned_data_path, \
+                              target_input_aligned_data_path, \
+                              reference_env, \
+                              "full_volume_registration_approx", \
+                              use_full_iters=False, \
+                              use_syn=True)
+
+    print "--Transforming brain and abdomen labels of the reference fish to the target's one"
+    target_input_data_labels_approx_path = \
+                transform_data(reference_input_aligned_data_label_path, \
+                               target_input_aligned_data_path, \
+                               parts_separation_prefix, \
+                               "full_volume_label_deformation", \
+                               reference_env, \
+                               target_env)
+
+    print "--Fish separation (reference image)..."
+    reference_abdomen_data_niigz_path, \
+    reference_abdomen_data_label_niigz_path, \
+    reference_head_data_niigz_path, \
+    reference_head_data_label_niigz_path = \
+                split_fish_body(reference_input_aligned_data_path, \
+                                reference_input_aligned_data_label_path, \
+                                "separated", \
+                                reference_env, \
+                                separation_overlap=separation_overlap, \
+                                zoom_key='zoomed')
+
+    print "--Fish separation (target image)..."
+    target_abdomen_data_niigz_path, \
+    target_abdomen_data_label_niigz_path, \
+    target_head_data_niigz_path, \
+    target_head_data_label_niigz_path = \
+                split_fish_body(target_input_aligned_data_path, \
+                                target_input_data_labels_approx_path, \
+                                "separated", \
+                                target_env, \
+                                separation_overlap=separation_overlap, \
+                                zoom_key='zoomed')
+
+    print "--Fish-organs separation (reference image)..."
+    reference_abdomen_local_separation_env = \
+                        split_fish_organs("original_organs", \
+                                          "reference_abdomen_local_separation", \
+                                          reference_input_aligned_data_label_path, \
+                                          reference_input_aligned_data_path, \
+                                          reference_env, \
+                                          ZOOM_KEY, \
+                                          overlap=separation_overlap)
+
+    zoomed_abdomen_extraction_name = 'zoomed_0p5_extracted_abdomen_part_nondeformed'
+
+    print "--Extract the reference fish's abdomenal part using transformed abdomenal part labels..."
+    reference_abdomen_local_data_niigz_path, \
+    reference_abdomen_local_data_labels_niigz_path, \
+    reference_abdomen_local_data_bbox = \
+                    extract_largest_label(reference_abdomen_data_niigz_path, \
+                                          reference_abdomen_data_label_niigz_path, \
+                                          zoomed_abdomen_extraction_name, \
+                                          reference_env, \
+                                          bb_side_offset=bb_side_offset)
+
+    print "--Extract the target fish's abdomenal part using transformed abdomenal part labels..."
+    target_abdomen_local_data_niigz_path, \
+    _, \
+    target_abdomen_local_data_bbox = \
+                    extract_largest_label(target_abdomen_data_niigz_path, \
+                                          target_abdomen_data_label_niigz_path, \
+                                          zoomed_abdomen_extraction_name, target_env, \
+                                          bb_side_offset=bb_side_offset)
+
+
+
+    print "--Extract the reference fish's abdomenal part organs using transformed abdomenal part labels..."
+    reference_abdomen_local_organs_env = \
+                    extract_organs_by_bbox(reference_abdomen_local_separation_env, \
+                                           "reference_abdomen_local_organs", \
+                                           reference_abdomen_local_data_bbox, \
+                                           reference_env, \
+                                           ZOOM_KEY)
+
+    print "--Register reference fish's extracted abdomenal part to the target's one..."
+    reference_abdomen_local_registration_prefix_name = \
+                              register_data(reference_abdomen_local_data_niigz_path, \
+                                            target_abdomen_local_data_niigz_path, \
+                                            reference_env, \
+                                            'reference_abdomen_local_registration', \
+                                            use_full_iters=True, num_threads=8)
+
+    print "--Transfrom labels of reference fish's extracted abdomenal part into the target's one..."
+    target_abdomen_local_data_labels_niigz_path = \
+                              transform_data(reference_abdomen_local_data_labels_niigz_path, \
+                                             target_abdomen_local_data_niigz_path, \
+                                             reference_abdomen_local_registration_prefix_name, \
+                                             zoomed_abdomen_extraction_name, \
+                                             reference_env, \
+                                             target_env)
+
+    print "--Transfrom labels of reference fish's organs extracted abdomenal part into the target's one..."
+    target_abdomen_local_organs_approx_env = \
+                              transform_organs_data(reference_abdomen_local_organs_env, \
+                                                    target_abdomen_local_data_niigz_path, \
+                                                    ZOOM_KEY, \
+                                                    reference_abdomen_local_registration_prefix_name, \
+                                                    "target_abdomen_local_organs_labels_approx", \
+                                                    reference_env, \
+                                                    target_env)
+
+    print "--Extract the target fish's organs labels..."
+    target_extracted_abdomen_organs_env = \
+                              extract_organs_by_labels(target_abdomen_local_organs_approx_env, \
+                                                       "target_extracted_abdomen_organs", \
+                                                       target_env, \
+                                                       ZOOM_KEY, \
+                                                       bb_side_offset=bb_side_offset)
+
+    print "--Extract the reference fish's organs labels..."
+    reference_extracted_abdomen_organs_env = \
+                              extract_organs_by_labels(reference_abdomen_local_organs_env, \
+                                                       "reference_extracted_abdomen_organs", \
+                                                       reference_env, \
+                                                       ZOOM_KEY, \
+                                                       bb_side_offset=bb_side_offset)
+
+    print "--Complete the target fish's organs labels to the full volume size..."
+    target_completed_organs_env = \
+                   complete_organs_to_full_volume(target_extracted_abdomen_organs_env, \
+                                                  "target_completed_organs", \
+                                                  target_abdomen_data_niigz_path, \
+                                                  target_head_data_niigz_path, \
+                                                  target_abdomen_local_data_niigz_path,\
+                                                  target_abdomen_local_data_bbox, \
+                                                  target_input_aligned_data_path, \
+                                                  target_env, \
+                                                  ZOOM_KEY, \
+                                                  separation_overlap=separation_overlap, \
+                                                  body_part='abdomen')
+
+    print "--Upscale the completed target fish's organs labels to the initial volume size..."
+    target_original_input_aligned_data_path = target_env.envs['extracted_input_data_path_niigz']
+    target_upscaled_completed_organs_env = \
+                   upscale_organs_labels(target_completed_organs_env, \
+                                         "target_upscaled_completed_organs", \
+                                         target_original_input_aligned_data_path, \
+                                         target_env, \
+                                         ZOOM_KEY, \
+                                         NORMAL_KEY)
+
+    print "--Extract the target fish's organs from the upscaled volume..."
+    target_extracted_upscaled_abdomen_organs_env = \
+                   extract_organs_by_labels(target_upscaled_completed_organs_env, \
+                                            "target_extracted_upscaled_abdomen_organs", \
+                                            target_env, \
+                                            NORMAL_KEY, \
+                                            bb_side_offset=bb_side_offset)
+
+    print "--Extract the refernce fish's organs from the original volume..."
+    reference_extracted_original_abdomen_organs_env = \
+                   extract_organs_by_labels("original_organs", \
+                                            "reference_extracted_original_abdomen_organs", \
+                                            reference_env, \
+                                            NORMAL_KEY, \
+                                            bb_side_offset=bb_side_offset)
+
+    print "--Segment upscaled target fish's organs data..."
+    target_upscaled_segmented_organs_env = \
+                   segment_organs_by_labels(target_extracted_upscaled_abdomen_organs_env, \
+                                            "target_upscaled_segmented_organs", \
+                                            target_env, \
+                                            NORMAL_KEY)
+
+    print "--Segment original reference fish's organs data..."
+    reference_original_segmented_organs_env = \
+                   segment_organs_by_labels(reference_extracted_original_abdomen_organs_env, \
+                                            "reference_original_segmented_organs", \
+                                            reference_env, \
+                                            NORMAL_KEY)
+
+@timing
+def scaled_abdomen_based_heart_segmentation_ants(reference_data_env, target_data_env):
+    # bb_side_offset = 10
+    # reference_data_env.load()
+    # target_data_env.load()
+    #
+    # zoomed_abdomen_extraction_name = 'zoomed_0p5_extracted_abdomen_part_nondeformed'
+    #
+    # print "--Extract the target fish's abdomenal part using transformed
+    # abdomenal part labels..."
+    # abdomen_part_data_volume_target_niigz_path, \
+    # _, \
+    # abdomen_part_data_volume_target_bbox = \
+    #     extract_largest_label(target_data_env.envs['zoomed_0p5_abdomen_input_data_path_niigz'], \
+    #                           target_data_env.envs['zoomed_0p5_abdomen_labels_input_data_path_niigz'], \
+    #                           zoomed_abdomen_extraction_name, target_data_env)
+    #
+    # print "--Extract the reference fish's abdomenal part using transformed abdomenal part labels..."
+    # abdomen_part_data_volume_reference_niigz_path, \
+    # abdomen_part_data_volume_labels_reference_niigz_path, \
+    # abdomen_part_data_volume_reference_bbox = \
+    #     extract_largest_label(reference_data_env.envs['zoomed_0p5_abdomen_input_data_path_niigz'], \
+    #                           reference_data_env.envs['zoomed_0p5_abdomen_labels_input_data_path_niigz'], \
+    #                           zoomed_abdomen_extraction_name, reference_data_env)
+
+    # print "--Extract the reference fish's abdomenal part organs using transformed abdomenal part labels..."
+    # abdomen_separated_organs_labels_dict = reference_data_env.get_abdomen_separated_organs_labels()
+    # extracted_abdomen_part_separated_organs_labels_dict = reference_data_env.get_extracted_abdomen_part_separated_organs_labels()
+    #
+    # output_data_labels_dict, _ = \
+    #         extract_organs_by_largest_labels(abdomen_separated_organs_labels_dict, \
+    #                                          reference_data_env.envs['zoomed_0p5_abdomen_input_data_path_niigz'], \
+    #                                          extracted_abdomen_part_separated_organs_labels_dict, \
+    #                                          zoomed_abdomen_extraction_name, \
+    #                                          reference_data_env, \
+    #                                          'zoomed', \
+    #                                          bb_side_offset=bb_side_offset)
+    #
+    # reference_data_env.set_extracted_abdomen_part_separated_organs_labels(output_data_labels_dict)
+    # reference_data_env.save()
+
+    # print "--Register reference fish's extracted abdomenal part to the target's one..."
+    # #Register reference abdomen to target one
+    # abdomen_part_registration_prefix_name = \
+    #                 register_data(abdomen_part_data_volume_reference_niigz_path, \
+    #                               abdomen_part_data_volume_target_niigz_path, \
+    #                               reference_data_env, \
+    #                               'extracted_abdomen_part_registration', \
+    #                               use_full_iters=True)
+
+    # print "--Transfrom labels of reference fish's extracted abdomenal part into the target's one..."
+    # abdomen_part_data_volume_labels_target_niigz_path = \
+    #         transform_data(abdomen_part_data_volume_labels_reference_niigz_path, \
+    #                        abdomen_part_data_volume_target_niigz_path, \
+    #                        abdomen_part_registration_prefix_name, \
+    #                        zoomed_abdomen_extraction_name, \
+    #                        reference_data_env, \
+    #                        target_data_env)
+
+    # print "--Transfrom labels of reference fish's organs extracted abdomenal part into the target's one..."
+    # reference_extracted_abdomen_part_separated_organs_labels_dict = \
+    #             reference_data_env.get_extracted_abdomen_part_separated_organs_labels()
+    #
+    # target_extracted_abdomen_part_separated_organs_labels_dict = \
+    #             target_data_env.get_extracted_abdomen_part_separated_organs_labels()
+    #
+    # output_data_dict = \
+    #     transform_organs_data(reference_extracted_abdomen_part_separated_organs_labels_dict, \
+    #                           target_extracted_abdomen_part_separated_organs_labels_dict, \
+    #                           'zoomed', \
+    #                           abdomen_part_data_volume_target_niigz_path, \
+    #                           abdomen_part_registration_prefix_name, \
+    #                           zoomed_abdomen_extraction_name, \
+    #                           reference_data_env, \
+    #                           target_data_env)
+    #
+    # target_data_env.set_extracted_abdomen_part_separated_organs_labels(output_data_dict)
+    # target_data_env.save()
+    #
+    # zoomed_abdomed_organ_extracted_name  = 'zoomed_0p5_abdomen_part_extracted_roi'
+
+    print "--Extract the target fish's organs labels from the initial volume..."
+    target_extracted_organs_dict = target_data_env.get_extracted_roi_abdomen_part_separated_organs()
+    target_extracted_organs_labels_dict = target_data_env.get_extracted_roi_abdomen_part_separated_organs_labels()
+    target_organs_labels_dict = target_data_env.get_extracted_abdomen_part_separated_organs_labels()
+
+    target_output_data_labels_dict, target_output_data_dict = \
+            extract_organs_by_largest_labels(target_organs_labels_dict, \
+                                             abdomen_part_data_volume_target_niigz_path, \
+                                             target_extracted_organs_labels_dict, \
+                                             zoomed_abdomed_organ_extracted_name, \
+                                             target_data_env, \
+                                             'zoomed', \
+                                             bb_side_offset=bb_side_offset, \
+                                             output_data_dict=target_extracted_organs_dict)
+
+    target_data_env.set_extracted_abdomen_part_separated_organs(target_output_data_dict)
+    target_data_env.set_extracted_abdomen_part_separated_organs_labels(target_output_data_labels_dict)
+    target_data_env.save()
+
+    print "--Extract the reference fish's organs labels from the initial volume..."
+    reference_extracted_organs_dict = reference_data_env.get_extracted_roi_abdomen_part_separated_organs()
+    reference_extracted_organs_labels_dict = reference_data_env.get_extracted_roi_abdomen_part_separated_organs_labels()
+    reference_organs_labels_dict = reference_data_env.get_extracted_abdomen_part_separated_organs_labels()
+
+    reference_output_data_labels_dict, reference_output_data_dict = \
+            extract_organs_by_largest_labels(reference_organs_labels_dict, \
+                                             abdomen_part_data_volume_reference_niigz_path, \
+                                             reference_extracted_organs_labels_dict, \
+                                             zoomed_abdomed_organ_extracted_name, \
+                                             reference_data_env, \
+                                             'zoomed', \
+                                             bb_side_offset=bb_side_offset, \
+                                             output_data_dict=reference_extracted_organs_dict)
+
+    reference_data_env.set_extracted_abdomen_part_separated_organs(reference_output_data_dict)
+    reference_data_env.set_extracted_abdomen_part_separated_organs_labels(reference_output_data_labels_dict)
+    reference_data_env.save()
+
+@timing
+def abdomen_based_heart_segmentation_ants(reference_data_env, target_data_env):
+    bb_side_offset = 10
+    reference_data_env.load()
+    target_data_env.load()
+
+    print "--Extract the target fish's abdomenal part using transformed abdomenal part labels..."
+    # Extract target abdomenal part volume
+    abdomen_part_label_target = open_data(target_data_env.envs['zoomed_0p5_abdomen_labels_input_data_path_niigz'])
+    abdomen_part_data_target = open_data(target_data_env.envs['zoomed_0p5_abdomen_input_data_path_niigz'])
+    abdomen_part_data_volume_target, abdomen_part_data_volume_target_bbox = \
+            extract_largest_volume_by_label(abdomen_part_data_target, \
+                                            abdomen_part_label_target, \
+                                            bb_side_offset=bb_side_offset)
+    abdomen_part_data_volume_target_niigz_path = \
+        target_data_env.get_new_volume_niigz_path(abdomen_part_data_volume_target.shape, \
+                                'zoomed_0p5_extracted_abdomen_part_nondeformed')
+
+    print abdomen_part_data_volume_target_niigz_path
+
+    if True:
+    #if not os.path.exists(abdomen_part_data_volume_target_niigz_path):
+        save_as_nifti(abdomen_part_data_volume_target, abdomen_part_data_volume_target_niigz_path)
+
+    reference_data_env.save()
+    target_data_env.save()
+
+    print "--Extract the reference fish's abdomenal part using transformed abdomenal part labels..."
+    # Extract reference brain volume
+    abdomen_part_label_reference = open_data(reference_data_env.envs['zoomed_0p5_abdomen_labels_input_data_path_niigz'])
+    abdomen_part_data_reference = open_data(reference_data_env.envs['zoomed_0p5_abdomen_input_data_path_niigz'])
+    abdomen_part_data_volume_reference, abdomen_part_reference_bbox = \
+                        extract_largest_volume_by_label(abdomen_part_data_reference, \
+                                                        abdomen_part_label_reference, \
+                                                        bb_side_offset=bb_side_offset)
+    abdomen_part_data_labels_volume_reference = abdomen_part_label_reference[abdomen_part_reference_bbox]
+
+    abdomen_part_data_volume_reference_niigz_path = \
+            reference_data_env.get_new_volume_niigz_path(abdomen_part_data_volume_reference.shape, \
+                'zoomed_0p5_extracted_abdomen_part_nondeformed')
+    abdomen_part_data_labels_volume_reference_niigz_path = \
+            reference_data_env.get_new_volume_niigz_path(abdomen_part_data_labels_volume_reference.shape, \
+                'zoomed_0p5_extracted_abdomen_part_labels_nondeformed')
+
+    print abdomen_part_data_volume_reference_niigz_path
+    print abdomen_part_data_labels_volume_reference_niigz_path
+
+    if True:
+    #if not os.path.exists(abdomen_part_data_volume_reference_niigz_path):
+        save_as_nifti(abdomen_part_data_volume_reference, abdomen_part_data_volume_reference_niigz_path)
+
+    if True:
+    #if not os.path.exists(abdomen_part_data_labels_volume_reference_niigz_path):
+        save_as_nifti(abdomen_part_data_labels_volume_reference, abdomen_part_data_labels_volume_reference_niigz_path)
+
+    reference_data_env.save()
+    target_data_env.save()
+
+    print "--Extract the reference fish's abdomenal part organs using transformed abdomenal part labels..."
+    extracted_abdomen_part_separated_organs_labels_dict = reference_data_env.get_extracted_abdomen_part_separated_organs_labels()
+
+    print 'extracted_abdomen_part_separated_organs_labels_dict = %s' % str(reference_data_env.get_extracted_abdomen_part_separated_organs_labels())
+
+    if True:
+    #if not extracted_abdomen_part_separated_organs_labels_dict:
+        abdomen_separated_organs_labels_dict = reference_data_env.get_abdomen_separated_organs_labels()
+
+        for organ_name, organ_labels in abdomen_separated_organs_labels_dict.iteritems():
+            zoomed_abdomen_separated_organ_label_path = organ_labels['zoomed']
+            zoomed_abdomen_separated_organ_label_data = open_data(zoomed_abdomen_separated_organ_label_path)
+
+            abdomen_part_data_organ_label_volume_reference = zoomed_abdomen_separated_organ_label_data[abdomen_part_reference_bbox]
+
+            abdomen_part_data_organ_label_volume_reference_niigz_path = \
+                    reference_data_env.get_new_volume_niigz_path(abdomen_part_data_organ_label_volume_reference.shape, \
+                    'zoomed_0p5_extracted_abdomen_part_organ_%s_labels' % organ_name)
+            if True:
+            #if not os.path.exists(abdomen_part_data_organ_label_volume_reference_niigz_path):
+                save_as_nifti(abdomen_part_data_organ_label_volume_reference, abdomen_part_data_organ_label_volume_reference_niigz_path)
+
+            extracted_abdomen_part_separated_organs_labels_dict[organ_name] = { 'normal': None, 'zoomed': abdomen_part_data_organ_label_volume_reference_niigz_path }
+
+    reference_data_env.set_extracted_abdomen_part_separated_organs_labels(extracted_abdomen_part_separated_organs_labels_dict)
+    reference_data_env.save()
+
+    print 'extracted_abdomen_part_separated_organs_labels_dict = %s' % str(reference_data_env.get_extracted_abdomen_part_separated_organs_labels())
+
+
+    print "--Register reference fish's extracted abdomenal part to the target's one..."
+    #Register reference abdomen to target one
+    ants_prefix_ext_abdomen_reg = 'extracted_abdomen_part_registration'
+    ants_ext_abdomen_reg_paths = reference_data_env.get_aligned_data_paths(ants_prefix_ext_abdomen_reg)
+
+    reference_image_path_ext_abdomen_reg = abdomen_part_data_volume_reference_niigz_path
+    target_image_path_ext_abdomen_reg = abdomen_part_data_volume_target_niigz_path
+
+    output_name_ext_abdomen_reg = ants_ext_abdomen_reg_paths['out_name']
+    warped_path_ext_abdomen_reg = ants_ext_abdomen_reg_paths['warped']
+    iwarped_path_ext_abdomen_reg = ants_ext_abdomen_reg_paths['iwarp']
+
+    if True:
+    #if not os.path.exists(warped_path_ext_abdomen_reg):
+        align_fish_simple_ants(reference_data_env, target_image_path_ext_abdomen_reg, \
+                               reference_image_path_ext_abdomen_reg, output_name_ext_abdomen_reg, \
+                               warped_path_ext_abdomen_reg, iwarped_path_ext_abdomen_reg, \
+                               reg_prefix=ants_prefix_ext_abdomen_reg, use_syn=True, \
+                               use_full_iters=True)
+
+        reference_data_env.save()
+        target_data_env.save()
+    else:
+        print "Extracted abdomenal part of the reference data is already registered to the extracted one of target"
+
+    print "--Transfrom labels of reference fish's extracted abdomenal part into the target's one..."
+    # Transforming labels of abdomenal part of reference fish to the abdomenal part of target one
+    ref_image_path_ext_htr = target_image_path_ext_abdomen_reg
+    transformation_path_ext_htr = ants_ext_abdomen_reg_paths['gen_affine']
+    def_transformation_path_ext_htr = ants_ext_abdomen_reg_paths['warp']
+    labels_image_path_ext_htr = abdomen_part_data_labels_volume_reference_niigz_path
+
+    test_data_ext_htr = open_data(ref_image_path_ext_htr)
+    transformation_output_ext_htr = \
+            target_data_env.get_new_volume_niigz_path(test_data_ext_htr.shape, \
+                        'zoomed_0p5_extracted_abdomen_part_labels_nondeformed')
+    reg_prefix_ext_htr = 'extracted_abdomen_label_deforming'
+
+    if True:
+    #if not os.path.exists(transformation_output_ext_htr):
+        apply_transform_fish(target_data_env, ref_image_path_ext_htr, \
+                             transformation_path_ext_htr, labels_image_path_ext_htr, \
+                             transformation_output_ext_htr, \
+                             def_transformation_path=def_transformation_path_ext_htr, \
+                             reg_prefix=reg_prefix_ext_htr)
+        reference_data_env.save()
+        target_data_env.save()
+    else:
+        print "Extracted abdomenal part data is already transformed"
+
+    print "--Transfrom labels of reference fish's organs extracted abdomenal part into the target's one..."
+
+    reference_extracted_abdomen_part_separated_organs_labels_dict = \
+                reference_data_env.get_extracted_abdomen_part_separated_organs_labels()
+    print 'reference_extracted_abdomen_part_separated_organs_labels_dict = %s'% \
+            str(reference_extracted_abdomen_part_separated_organs_labels_dict)
+
+    print str(target_data_env.envs)
+    target_extracted_abdomen_part_separated_organs_labels_dict = \
+            target_data_env.get_extracted_abdomen_part_separated_organs_labels()
+    print 'target_extracted_abdomen_part_separated_organs_labels_dict = %s' % \
+            str(target_extracted_abdomen_part_separated_organs_labels_dict)
+
+    if True:
+    #if not target_extracted_abdomen_part_separated_organs_labels_dict:
+        for organ_name, organ_labels in reference_extracted_abdomen_part_separated_organs_labels_dict.iteritems():
+            print '----Extracting abdomenal organ %s' % organ_name
+
+            organ_ref_image_path_ext_htr = target_image_path_ext_abdomen_reg
+            organ_transformation_path_ext_htr = ants_ext_abdomen_reg_paths['gen_affine']
+            organ_def_transformation_path_ext_htr = ants_ext_abdomen_reg_paths['warp']
+            organ_labels_image_path_ext_htr = organ_labels['zoomed']
+
+            organ_test_data_ext_htr = open_data(organ_ref_image_path_ext_htr)
+            organ_transformation_output_ext_htr = \
+                    target_data_env.get_new_volume_niigz_path(organ_test_data_ext_htr.shape, \
+                        'zoomed_0p5_extracted_abdomen_part_organ_%s_labels' % organ_name)
+
+            organ_reg_prefix_ext_htr = 'extracted_abdomen_organ_%s_label_deforming' % organ_name
+
+            if True:
+            #if not os.path.exists(organ_transformation_output_ext_htr):
+                apply_transform_fish(target_data_env, organ_ref_image_path_ext_htr, \
+                                     organ_transformation_path_ext_htr, organ_labels_image_path_ext_htr, \
+                                     organ_transformation_output_ext_htr, \
+                                     def_transformation_path=organ_def_transformation_path_ext_htr, \
+                                     reg_prefix=organ_reg_prefix_ext_htr)
+
+                target_extracted_abdomen_part_separated_organs_labels_dict[organ_name] = \
+                        { 'normal': None, 'zoomed': organ_transformation_output_ext_htr }
+                target_data_env.set_extracted_abdomen_part_separated_organs_labels(target_extracted_abdomen_part_separated_organs_labels_dict)
+
+                reference_data_env.save()
+                target_data_env.save()
+            else:
+                print "Extracted abdomenal organ '%s' part data is already transformed" % organ_name
+
+    reference_data_env.save()
+    target_data_env.save()
+
+    print 'reference_extracted_abdomen_part_separated_organs_labels_dict = %s' % str(reference_extracted_abdomen_part_separated_organs_labels_dict)
+    print 'target_extracted_abdomen_part_separated_organs_labels_dict = %s' % str(target_extracted_abdomen_part_separated_organs_labels_dict)
+    '''
+    print "--Upscale the target fish's organs labels to the initial volume size..."
+    target_organs_labels_dict = target_data_env.get_organs_labels()
+
+    if True:
+    #if target_organs_labels_dict:
+        for organ_name, organ_labels in target_extracted_abdomen_part_separated_organs_labels_dict.iteritems():
+            zoomed_extracted_organ_label_path = organ_labels['zoomed']
+
+            zoomed_organ_labels = complete_brain_to_full_volume(abdomen_data_part_labels_target_niigz_path, \
+                                                                head_data_part_labels_target_niigz_path, \
+                                                                transformation_output_brain_tr, \
+                                                                brain_data_volume_target_bbox, \
+                                                                separation_overlap=20)
+
+            original_aligned_data_path = target_data_env.get_input_align_data_path()
+            original_aligned_data = open_data(original_aligned_data_path)
+
+            upscaled_organ_label_niigz_path = target_data_env.get_new_volume_niigz_path(original_aligned_data.shape, 'extracted_organ_%s_labels' % organ_name, bits=8)
+
+            if True:
+            #if not os.path.exists(upscaled_organ_label_niigz_path):
+                upscaled_organ_label_data = scale_to_size(original_aligned_data_path, \
+                                                          zoomed_organ_label_path, \
+                                                          scale=2.0, \
+                                                          order=0)
+                save_as_nifti(upscaled_organ_label_data, upscaled_organ_label_niigz_path)
+                target_organs_labels_dict[organ_name]['normal'] = upscaled_organ_label_niigz_path
+
+        target_data_env.set_organs_labels(target_organs_labels_dict)
+
+        reference_data_env.save()
+        target_data_env.save()
+    else:
+        print "The target fish's organs labels are already upscaled to the input volume size."
+
+    print "--Complete the target fish's organs labels to full volume..."
+    test_data_complete_vol_brain_target = open_data(target_image_path_sep)
+    complete_vol_target_brain_labels_niigz_path = target_data_env.get_new_volume_niigz_path(test_data_complete_vol_brain_target.shape, 'zoomed_0p5_complete_volume_brain_labels', bits=8)
+
+    # if True:
+    if not os.path.exists(complete_vol_target_brain_labels_niigz_path):
+        complete_vol_target_brain_labels = complete_brain_to_full_volume(abdomen_data_part_labels_target_niigz_path, \
+                                                                         head_data_part_labels_target_niigz_path, \
+                                                                         transformation_output_brain_tr, \
+                                                                         brain_data_volume_target_bbox, \
+                                                                         separation_overlap=20);
+        save_as_nifti(complete_vol_target_brain_labels, complete_vol_target_brain_labels_niigz_path)
+    else:
+        print "The brain labels of the target data (target fish) is already transformed."
+    '''
+    print "--Extract the target fish's organs labels from the initial volume..."
+    target_extracted_organs_dict = target_data_env.get_extracted_roi_abdomen_part_separated_organs()
+    target_extracted_organs_labels_dict = target_data_env.get_extracted_roi_abdomen_part_separated_organs_labels()
+    target_organs_labels_dict = target_data_env.get_extracted_abdomen_part_separated_organs_labels()
+
+    bb_side_offset = 10
+
+    if True:
+    #if (not target_extracted_organs_labels_dict) and (not target_extracted_organs_dict):
+        for organ_name, organ_labels in target_organs_labels_dict.iteritems():
+            normal_organ_label_path = organ_labels['zoomed']
+            normal_organ_label_data = open_data(normal_organ_label_path)
+
+            original_aligned_data_path = target_image_path_ext_abdomen_reg
+            original_aligned_data = open_data(original_aligned_data_path)
+
+            extracted_organ, extracted_organ_bbox = extract_largest_volume_by_label(original_aligned_data, normal_organ_label_data, bb_side_offset=bb_side_offset)
+            extracted_organ_label = normal_organ_label_data[extracted_organ_bbox]
+
+            extracted_organ_niigz_path = \
+                    target_data_env.get_new_volume_niigz_path(extracted_organ.shape, \
+                        'zoomed_0p5_extracted_roi_organ_%s' % organ_name)
+            extracted_organ_label_niigz_path = \
+                    target_data_env.get_new_volume_niigz_path(extracted_organ_label.shape, \
+                        'zoomed_0p5_eextracted_roi_organ_%s_label' % organ_name, bits=8)
+
+            print extracted_organ_niigz_path
+            print extracted_organ_label_niigz_path
+
+            if True:
+            #if not os.path.exists(extracted_organ_niigz_path):
+                save_as_nifti(extracted_organ, extracted_organ_niigz_path)
+
+            if True:
+            #if not os.path.exists(extracted_organ_label_niigz_path):
+                save_as_nifti(extracted_organ_label, extracted_organ_label_niigz_path)
+
+            target_extracted_organs_dict[organ_name] = { 'normal': None, 'zoomed': extracted_organ_niigz_path }
+            target_extracted_organs_labels_dict[organ_name] = { 'normal': None, 'zoomed': extracted_organ_label_niigz_path }
+
+            target_data_env.set_extracted_roi_abdomen_part_separated_organs(target_extracted_organs_dict)
+            target_data_env.set_extracted_roi_abdomen_part_separated_organs_labels(target_extracted_organs_labels_dict)
+
+            reference_data_env.save()
+            target_data_env.save()
+
+    print 'target_data_env.get_extracted_organs = %s' % str(target_data_env.get_extracted_roi_abdomen_part_separated_organs())
+    print 'target_data_env.get_extracted_organs_labels = %s' % str(target_data_env.get_extracted_roi_abdomen_part_separated_organs_labels())
+
+    print "--Extract the reference fish's organs labels from the initial volume..."
+    reference_extracted_organs_dict = reference_data_env.get_extracted_roi_abdomen_part_separated_organs()
+    reference_extracted_organs_labels_dict = reference_data_env.get_extracted_roi_abdomen_part_separated_organs_labels()
+    reference_organs_labels_dict = reference_data_env.get_extracted_abdomen_part_separated_organs_labels()
+
+    if True:
+    #if (not reference_extracted_organs_labels_dict) and (not reference_extracted_organs_dict):
+        for organ_name, organ_labels in reference_organs_labels_dict.iteritems():
+            normal_organ_label_path = organ_labels['zoomed']
+            normal_organ_label_data = open_data(normal_organ_label_path)
+
+            original_aligned_data_path = reference_image_path_ext_abdomen_reg
+            original_aligned_data = open_data(original_aligned_data_path)
+
+            extracted_organ, extracted_organ_bbox = extract_largest_volume_by_label(original_aligned_data, normal_organ_label_data, bb_side_offset=bb_side_offset)
+            extracted_organ_label = normal_organ_label_data[extracted_organ_bbox]
+
+            extracted_organ_niigz_path = reference_data_env.get_new_volume_niigz_path(extracted_organ.shape, 'zoomed_0p5_extracted_roi_organ_%s' % organ_name)
+            extracted_organ_label_niigz_path = \
+                reference_data_env.get_new_volume_niigz_path(extracted_organ_label.shape, \
+                    'zoomed_0p5_extracted_roi_organ_%s_label' % organ_name, bits=8)
+
+            if True:
+            #if not os.path.exists(extracted_organ_niigz_path):
+                save_as_nifti(extracted_organ, extracted_organ_niigz_path)
+
+            if True:
+            #if not os.path.exists(extracted_organ_label_niigz_path):
+                save_as_nifti(extracted_organ_label, extracted_organ_label_niigz_path)
+
+            reference_extracted_organs_dict[organ_name] = { 'normal': extracted_organ_niigz_path, 'zoomed': None }
+            reference_extracted_organs_labels_dict[organ_name] = { 'normal': extracted_organ_label_niigz_path, 'zoomed': None }
+
+            reference_data_env.set_extracted_roi_abdomen_part_separated_organs(reference_extracted_organs_dict)
+            reference_data_env.set_extracted_roi_abdomen_part_separated_organs_labels(reference_extracted_organs_labels_dict)
+
+            reference_data_env.save()
+            target_data_env.save()
+
+    print 'reference_data_env.get_extracted_organs = %s' % \
+            str(reference_data_env.get_extracted_roi_abdomen_part_separated_organs())
+    print 'reference_data_env.get_extracted_organs_labels = %s' % \
+            str(reference_data_env.get_extracted_roi_abdomen_part_separated_organs_labels())
+
+@timing
+def brain_segmentation_ants(reference_data_env, target_data_env):
+    bb_side_offset = 5
+    separation_overlap = 10
+
+    # bb_side_offset = 2
+    # separation_overlap = 3
+
+    reference_data_env.load()
+    target_data_env.load()
+
+    organs_labels = ['heart']
+
+    # Crop the raw data
+    print "--Aligning and volumes' extraction"
+    reference_data_results = initialize_env(reference_data_env, zoom_level=2, min_zoom_level=2, organs_labels=organs_labels)
+    moving_data_results = initialize_env(target_data_env, zoom_level=2, min_zoom_level=2)
+
+    #sys.exit(1)
+
+    reference_data_env.save()
+    target_data_env.save()
+
+
+
+    #sys.exit(1)
+
 
     #generate_stats(reference_data_env)
     #generate_stats(target_data_env)
@@ -2629,6 +4766,10 @@ def brain_segmentation_ants(reference_data_env, target_data_env):
     working_env_sep = reference_data_env
     reference_image_path_sep = reference_data_env.envs['zoomed_0p5_extracted_input_data_path_niigz']
     target_image_path_sep = target_data_env.envs['zoomed_0p5_extracted_input_data_path_niigz']
+
+    print "\033[1;31m reference_image_path_sep = %s \033[0m" % reference_image_path_sep
+    print "\033[1;31m target_image_path_sep = %s \033[0m" % target_image_path_sep
+
     target_image_path_sep_raw = target_data_env.envs['zoomed_0p5_extracted_input_data_path']
     output_name_sep = ants_separation_paths['out_name']
     warped_path_sep = ants_separation_paths['warped']
@@ -2638,7 +4779,8 @@ def brain_segmentation_ants(reference_data_env, target_data_env):
     print target_image_path_sep
     print output_name_sep
 
-    if not os.path.exists(warped_path_sep):
+    if True:
+    #if not os.path.exists(warped_path_sep):
         align_fish_simple_ants(working_env_sep, target_image_path_sep, reference_image_path_sep, \
                                output_name_sep, warped_path_sep, iwarped_path_sep, \
                                reg_prefix=ants_prefix_sep, use_syn=True, use_full_iters=False)
@@ -2664,12 +4806,13 @@ def brain_segmentation_ants(reference_data_env, target_data_env):
 
     __, __, new_size, __ = parse_filename(target_image_path_sep_raw)
 
-    transformation_output_tr = target_data_env.get_new_volume_niigz_path(new_size, 'zoomed_0p5_extracted_labels', bits=8)
+    transformation_output_tr = target_data_env.get_new_volume_niigz_path(new_size, 'zoomed_0p5_extracted_labels')
     reg_prefix_tr = 'label_deforming'
 
     print transformation_output_tr
 
-    if not os.path.exists(transformation_output_tr):
+    if True:
+    #if not os.path.exists(transformation_output_tr):
         apply_transform_fish(wokring_env_tr, ref_image_path_tr, \
                              affine_transformation_path_tr, \
                              labels_image_path_tr, transformation_output_tr, \
@@ -2688,11 +4831,11 @@ def brain_segmentation_ants(reference_data_env, target_data_env):
     abdomen_data_part_labels_reference_niigz_path = None
     head_data_part_labels_reference_niigz_path = None
 
-    if not os.path.exists(reference_data_env.envs['zoomed_0p5_abdomen_input_data_path_niigz']) or \
-       not os.path.exists(reference_data_env.envs['zoomed_0p5_head_input_data_path_niigz']) or \
-       not os.path.exists(reference_data_env.envs['zoomed_0p5_abdomen_labels_input_data_path_niigz']) or \
-       not os.path.exists(reference_data_env.envs['zoomed_0p5_head_labels_input_data_path_niigz']):
-    #if True:
+    if True:
+    #if not os.path.exists(reference_data_env.envs['zoomed_0p5_abdomen_input_data_path_niigz']) or \
+    #   not os.path.exists(reference_data_env.envs['zoomed_0p5_head_input_data_path_niigz']) or \
+    #   not os.path.exists(reference_data_env.envs['zoomed_0p5_abdomen_labels_input_data_path_niigz']) or \
+    #   not os.path.exists(reference_data_env.envs['zoomed_0p5_head_labels_input_data_path_niigz']):
         aligned_data_reference = open_data(reference_image_path_sep)
         aligned_data_labels_reference = open_data(labels_image_path_tr)
 
@@ -2700,24 +4843,28 @@ def brain_segmentation_ants(reference_data_env, target_data_env):
 
         separation_pos_reference, abdomen_label_reference_full, head_label_reference_full = find_separation_pos(aligned_data_labels_reference)
 
-        abdomen_data_part_reference, head_data_part_reference = split_fish_by_pos(aligned_data_reference, separation_pos_reference, overlap=20)
-        abdomen_label_reference, _ = split_fish_by_pos(abdomen_label_reference_full, separation_pos_reference, overlap=20)
-        _, head_label_reference = split_fish_by_pos(head_label_reference_full, separation_pos_reference, overlap=20)
+        abdomen_data_part_reference, head_data_part_reference = split_fish_by_pos(aligned_data_reference, separation_pos_reference, overlap=separation_overlap)
+        abdomen_label_reference, _ = split_fish_by_pos(abdomen_label_reference_full, separation_pos_reference, overlap=separation_overlap)
+        _, head_label_reference = split_fish_by_pos(head_label_reference_full, separation_pos_reference, overlap=separation_overlap)
 
         abdomen_data_part_reference_niigz_path = reference_data_env.get_new_volume_niigz_path(abdomen_data_part_reference.shape, 'zoomed_0p5_abdomen')
-        if not os.path.exists(abdomen_data_part_reference_niigz_path):
+        if True:
+        #if not os.path.exists(abdomen_data_part_reference_niigz_path):
             save_as_nifti(abdomen_data_part_reference, abdomen_data_part_reference_niigz_path)
 
         head_data_part_reference_niigz_path = reference_data_env.get_new_volume_niigz_path(head_data_part_reference.shape, 'zoomed_0p5_head')
-        if not os.path.exists(head_data_part_reference_niigz_path):
+        if True:
+        #if not os.path.exists(head_data_part_reference_niigz_path):
             save_as_nifti(head_data_part_reference, head_data_part_reference_niigz_path)
 
         abdomen_data_part_labels_reference_niigz_path = reference_data_env.get_new_volume_niigz_path(abdomen_label_reference.shape, 'zoomed_0p5_abdomen_labels')
-        if not os.path.exists(abdomen_data_part_labels_reference_niigz_path):
+        if True:
+        #if not os.path.exists(abdomen_data_part_labels_reference_niigz_path):
             save_as_nifti(abdomen_label_reference, abdomen_data_part_labels_reference_niigz_path)
 
         head_data_part_labels_reference_niigz_path = reference_data_env.get_new_volume_niigz_path(head_label_reference.shape, 'zoomed_0p5_head_labels')
-        if not os.path.exists(head_data_part_labels_reference_niigz_path):
+        if True:
+        #if not os.path.exists(head_data_part_labels_reference_niigz_path):
             save_as_nifti(head_label_reference, head_data_part_labels_reference_niigz_path)
 
         print abdomen_data_part_labels_reference_niigz_path
@@ -2730,6 +4877,35 @@ def brain_segmentation_ants(reference_data_env, target_data_env):
         abdomen_data_part_labels_reference_niigz_path = reference_data_env.envs['zoomed_0p5_abdomen_labels_input_data_path_niigz']
         head_data_part_labels_reference_niigz_path = reference_data_env.envs['zoomed_0p5_head_labels_input_data_path_niigz']
 
+    print "--Fish-organs separation (reference image)..."
+    abdomen_separated_organs_labels_dict = reference_data_env.get_abdomen_separated_organs_labels()
+
+    print 'organs_labels_dict = %s' % str(reference_data_env.get_organs_labels())
+    print 'abdomen_separated_organs_labels_dict = %s' % str(reference_data_env.get_abdomen_separated_organs_labels())
+
+    aligned_data_labels_reference = open_data(labels_image_path_tr)
+    organ_separation_pos_reference, _, _ = find_separation_pos(aligned_data_labels_reference)
+
+    if not abdomen_separated_organs_labels_dict:
+        organs_labels_dict = reference_data_env.get_organs_labels()
+
+        for organ_name, organ_labels in organs_labels_dict.iteritems():
+            zoomed_organ_label_path = organ_labels['zoomed']
+            zoomed_organ_label_data = open_data(zoomed_organ_label_path)
+
+            abdomen_data_organ_part_reference, _ = split_fish_by_pos(zoomed_organ_label_data, organ_separation_pos_reference, overlap=separation_overlap)
+
+            abdomen_data_organ_part_reference_niigz_path = reference_data_env.get_new_volume_niigz_path(abdomen_data_organ_part_reference.shape, 'zoomed_0p5_abdomen_organ_%s_labels' % organ_name)
+            if not os.path.exists(abdomen_data_organ_part_reference_niigz_path):
+                save_as_nifti(abdomen_data_organ_part_reference, abdomen_data_organ_part_reference_niigz_path)
+
+            abdomen_separated_organs_labels_dict[organ_name] = { 'normal': None, 'zoomed': abdomen_data_organ_part_reference_niigz_path }
+
+    reference_data_env.set_abdomen_separated_organs_labels(abdomen_separated_organs_labels_dict)
+    reference_data_env.save()
+
+    print 'abdomen_separated_organs_labels = %s' % str(reference_data_env.get_abdomen_separated_organs_labels())
+
     #Separate head and tail of target image
     print "--Fish separation (target image)..."
     abdomen_data_part_target_niigz_path = None
@@ -2737,34 +4913,39 @@ def brain_segmentation_ants(reference_data_env, target_data_env):
     head_data_part_target_niigz_path = None
     head_data_part_labels_target_niigz_path = None
 
-    if not os.path.exists(target_data_env.envs['zoomed_0p5_abdomen_input_data_path_niigz']) or \
-       not os.path.exists(target_data_env.envs['zoomed_0p5_head_input_data_path_niigz']) or \
-       not os.path.exists(target_data_env.envs['zoomed_0p5_abdomen_labels_input_data_path_niigz']) or \
-       not os.path.exists(target_data_env.envs['zoomed_0p5_head_labels_input_data_path_niigz']):
+    if True:
+    #if not os.path.exists(target_data_env.envs['zoomed_0p5_abdomen_input_data_path_niigz']) or \
+    #   not os.path.exists(target_data_env.envs['zoomed_0p5_head_input_data_path_niigz']) or \
+    #   not os.path.exists(target_data_env.envs['zoomed_0p5_abdomen_labels_input_data_path_niigz']) or \
+    #   not os.path.exists(target_data_env.envs['zoomed_0p5_head_labels_input_data_path_niigz']):
 
         aligned_data_target = open_data(target_image_path_sep)
         aligned_data_labels_target = open_data(transformation_output_tr)
 
         separation_pos_target, abdomen_label_target_full, head_label_target_full = find_separation_pos(aligned_data_labels_target)
 
-        abdomen_data_part_target, head_data_part_target = split_fish_by_pos(aligned_data_target, separation_pos_target, overlap=20)
-        abdomen_label_target, _ = split_fish_by_pos(abdomen_label_target_full, separation_pos_target, overlap=20)
-        _, head_label_target = split_fish_by_pos(head_label_target_full, separation_pos_target, overlap=20)
+        abdomen_data_part_target, head_data_part_target = split_fish_by_pos(aligned_data_target, separation_pos_target, overlap=separation_overlap)
+        abdomen_label_target, _ = split_fish_by_pos(abdomen_label_target_full, separation_pos_target, overlap=separation_overlap)
+        _, head_label_target = split_fish_by_pos(head_label_target_full, separation_pos_target, overlap=separation_overlap)
 
         abdomen_data_part_target_niigz_path = target_data_env.get_new_volume_niigz_path(abdomen_data_part_target.shape, 'zoomed_0p5_abdomen')
-        if not os.path.exists(abdomen_data_part_target_niigz_path):
+        #if not os.path.exists(abdomen_data_part_target_niigz_path):
+        if True:
             save_as_nifti(abdomen_data_part_target, abdomen_data_part_target_niigz_path)
 
         head_data_part_target_niigz_path = target_data_env.get_new_volume_niigz_path(head_data_part_target.shape, 'zoomed_0p5_head')
-        if not os.path.exists(head_data_part_target_niigz_path):
+        if True:
+        #if not os.path.exists(head_data_part_target_niigz_path):
             save_as_nifti(head_data_part_target, head_data_part_target_niigz_path)
 
         abdomen_data_part_labels_target_niigz_path = target_data_env.get_new_volume_niigz_path(abdomen_label_target.shape, 'zoomed_0p5_abdomen_labels')
-        if not os.path.exists(abdomen_data_part_labels_target_niigz_path):
+        if True:
+        #if not os.path.exists(abdomen_data_part_labels_target_niigz_path):
             save_as_nifti(abdomen_label_target, abdomen_data_part_labels_target_niigz_path)
 
         head_data_part_labels_target_niigz_path = target_data_env.get_new_volume_niigz_path(head_label_target.shape, 'zoomed_0p5_head_labels')
-        if not os.path.exists(head_data_part_labels_target_niigz_path):
+        if True:
+        #if not os.path.exists(head_data_part_labels_target_niigz_path):
             save_as_nifti(head_label_target, head_data_part_labels_target_niigz_path)
 
         print abdomen_data_part_labels_target_niigz_path
@@ -2776,6 +4957,11 @@ def brain_segmentation_ants(reference_data_env, target_data_env):
         abdomen_data_part_labels_target_niigz_path = target_data_env.envs['zoomed_0p5_abdomen_labels_input_data_path_niigz']
         head_data_part_target_niigz_path = target_data_env.envs['zoomed_0p5_head_input_data_path_niigz']
         head_data_part_labels_target_niigz_path = target_data_env.envs['zoomed_0p5_head_labels_input_data_path_niigz']
+
+
+    organs_segmentation_ants(reference_data_env, target_data_env)
+
+    sys.exit(1)
 
     print "--Register reference fish's head to the target's one..."
     #Register reference head to target one
@@ -2956,7 +5142,7 @@ def brain_segmentation_ants(reference_data_env, target_data_env):
                                                                          head_data_part_labels_target_niigz_path, \
                                                                          transformation_output_brain_tr, \
                                                                          brain_data_volume_target_bbox, \
-                                                                         separation_overlap=20);
+                                                                         separation_overlap=separation_overlap);
         save_as_nifti(complete_vol_target_brain_labels, complete_vol_target_brain_labels_niigz_path)
     else:
         print "The brain labels of the target data (target fish) is already transformed."
@@ -2999,7 +5185,6 @@ def brain_segmentation_ants(reference_data_env, target_data_env):
                       upscaled_initially_aligned_complete_vol_target_brain_labels_niigz_path)
     else:
         print "The initially aligned completed target fish's brain labels is already upscaled to the input volume size."
-
 
     print "--Extract the target fish's brain labels from the upscaled initial volume..."
     upscaled_aligned_complete_target_data_brain_labels = open_data(upscaled_initially_aligned_complete_vol_target_brain_labels_niigz_path)
@@ -3188,6 +5373,41 @@ def complete_brain_to_full_volume(abdomed_part_path, head_part_path, extracted_b
 
     return mask_full_volume
 
+def complete_data_to_full_volume(abdomed_part_path, \
+                                 head_part_path, \
+                                 extracted_organ_volume_path, \
+                                 extracted_organ_volume_bbox, \
+                                 abdomen_local_part_path=None, \
+                                 abdomen_local_part_bbox=None, \
+                                 separation_overlap=1, \
+                                 body_part='head'):
+    abdomed_part = open_data(abdomed_part_path)
+    mask_volume_abdomed = np.zeros_like(abdomed_part, dtype=np.uint8)
+
+    head_part = open_data(head_part_path)
+    mask_volume_head = np.zeros_like(head_part, dtype=np.uint8)
+
+    extracted_organ_volume = open_data(extracted_organ_volume_path)
+
+    mask_volume_abdomed_local = None
+    if abdomen_local_part_path:
+        abdomed_part_local = open_data(abdomen_local_part_path)
+        mask_volume_abdomed_local = np.zeros_like(abdomed_part_local, dtype=np.uint8)
+
+    if body_part == 'head':
+        mask_volume_head[extracted_organ_volume_bbox] = extracted_organ_volume
+    else:
+        if mask_volume_abdomed_local is not None:
+            mask_volume_abdomed_local[extracted_organ_volume_bbox] = extracted_organ_volume
+            mask_volume_abdomed[abdomen_local_part_bbox] = mask_volume_abdomed_local
+        else:
+            mask_volume_abdomed[extracted_organ_volume_bbox] = extracted_organ_volume
+
+    # separation_overlap*2 - 1 because two parts overlap at some point and share it
+    mask_full_volume = np.concatenate((mask_volume_abdomed[:-(separation_overlap*2 - 1),:,:], mask_volume_head), axis=0)
+
+    return mask_full_volume
+
 def complete_volume_to_full_volume(target_data_shape, extracted_data, extracted_data_bbox):
     print 'target_data_shape = %s' % str(target_data_shape)
     print 'extracted_data.shape = %s' % str(extracted_data.shape)
@@ -3198,56 +5418,28 @@ def complete_volume_to_full_volume(target_data_shape, extracted_data, extracted_
 
     return completed_data
 
-def extract_largest_volume_by_label(stack_data, stack_labels, bb_side_offset=0):
-    stack_stats, _ = object_counter(stack_labels)
-    print "INPUT extract_largest_volume_by_label = %s" % str(stack_data.shape)
-    largest_volume_region, bbox, _ = extract_largest_area_data(stack_data, stack_stats, bb_side_offset)
-    print "BBOX extract_largest_volume_by_label = %s" % str(bbox)
-
-    return largest_volume_region, bbox
-
-def extract_effective_volume(stack_data, eyes_stats=None, bb_side_offset=0):
-    timer_total = Timer()
-
-    timer = Timer()
-    print 'Binarizing...'
-    binarized_stack, bbox, eyes_stats = binarizator(stack_data)
-    print bbox
-    print binarized_stack.shape
-    binarized_stack.tofile('/home/rshkarin/ANKA_work/AFS-playground/Segmentation/fish200/fish_binary_%s.raw' \
-            % str(binarized_stack.shape))
-    timer.elapsed('Binarizing')
-
-    timer = Timer()
-    print 'Object counting...'
-    binary_stack_stats, _ = object_counter(binarized_stack)
-    timer.elapsed('Object counting')
-
-    timer = Timer()
-    print 'Big volume extraction...'
-    largest_volume_region, largest_volume_region_bbox = extract_largest_area_data(stack_data, binary_stack_stats, bb_side_offset)
-    print largest_volume_region_bbox
-    timer.elapsed('Big volume extraction')
-
-    timer_total.elapsed('Total')
-
-    return largest_volume_region, largest_volume_region_bbox
-
 def generate_stats(data_env):
     data_env.load()
 
     glob_stats = 'input_data_global_statistics'
     eyes_stats = 'input_data_eyes_statistics'
 
-    if not data_env.is_entry_exists(glob_stats):
+    if True:
+    #if not data_env.is_entry_exists(glob_stats):
         input_data = open_data(data_env.envs['extracted_input_data_path'])
 
         print 'Global statistics...'
         t = Timer()
 
-        stack_statistics, _ = gather_statistics(input_data)
+        binarized_stack, _, _ = binarizator(input_data)
+        stack_statistics, thresholded_stack = object_counter(binarized_stack)
+
+        #stack_statistics, thresholded_stack = gather_statistics(input_data)
         global_stats_path = data_env.get_statistic_path('global')
         stack_statistics.to_csv(global_stats_path)
+
+        thresholded_stack_niigz_path = data_env.get_new_volume_niigz_path(thresholded_stack.shape, 'thresholded_stack')
+        save_as_nifti(thresholded_stack, thresholded_stack_niigz_path)
 
         t.elapsed('Gathering statistics')
 
@@ -3261,7 +5453,9 @@ def generate_stats(data_env):
         print 'Filtering eyes\' statistics...'
         t = Timer()
 
-        eyes_stats = eyes_statistics(stack_statistics)
+        eye_stack_statistics, _ = gather_statistics(input_data)
+
+        eyes_stats = eyes_statistics(eye_stack_statistics)
         eyes_stats_path = data_env.get_statistic_path('eyes')
         eyes_stats.to_csv(eyes_stats_path)
 
@@ -3323,15 +5517,15 @@ def align_fish_simple_ants(working_env, fixed_image_path, moving_image_path, out
     app = None
 
     if not use_syn:
-        app = 'antsRegistrationSyNExtended.sh -d 3 -f {fixedImagePath} ' \
-                '-m {movingImagePath} -o {out_name} -n {num_threads} -t k -p f'.format(**args_fmt)
+        app = 'antsRegistrationSyN.sh -d 3 -f {fixedImagePath} ' \
+                '-m {movingImagePath} -o {out_name} -n {num_threads} -t a -p f'.format(**args_fmt)
     else:
         if use_full_iters:
-            app = 'antsRegistrationSyNExtended.sh -d 3 -f {fixedImagePath} ' \
-                    '-m {movingImagePath} -o {out_name} -n {num_threads} -t d -p f'.format(**args_fmt)
+            app = 'antsRegistrationSyN.sh -d 3 -f {fixedImagePath} ' \
+                    '-m {movingImagePath} -o {out_name} -n {num_threads} -t b -p f'.format(**args_fmt)
         else:
-            app = 'antsRegistrationSyNExtended.sh -d 3 -f {fixedImagePath} ' \
-                    '-m {movingImagePath} -o {out_name} -n {num_threads} -t y -p f'.format(**args_fmt)
+            app = 'antsRegistrationSyNQuick.sh -d 3 -f {fixedImagePath} ' \
+                    '-m {movingImagePath} -o {out_name} -n {num_threads} -t b -p f'.format(**args_fmt)
 
     app = os.path.join(path_ants_scripts_fmt, app)
     print app
@@ -3339,8 +5533,6 @@ def align_fish_simple_ants(working_env, fixed_image_path, moving_image_path, out
     streamdata = process.communicate()[0]
     rc = process.returncode
     print "antsRegistration (Simple) = %d" % rc
-
-
 
 def align_fish_nifty(working_env, fixed_image_path, moving_image_path, \
         output_image_path, aff_path, inv_aff_path, cpp_image_path=None, \
@@ -3502,12 +5694,8 @@ def find_separation_pos(stack_labels, scale_factor=1):
 
     return int(abdomen_part_z / scale_factor), abdomen_labels, head_labels
 
-def extract_label_by_name(stack_labels, label_name='brain'):
-    label_marker = 1 if label_name == 'brain' else 2
-    labels = (stack_labels == label_marker).astype(np.uint8)
-    return labels
-
 def split_fish_by_pos(stack_data, separation_pos, overlap=1):
+    separation_overlap = stack_data.shape[0] * overlap/100.
     abdomen_data_part = stack_data[:separation_pos + overlap,:,:]
     head_data_part = stack_data[(separation_pos - overlap + 1):,:,:]
     print 'separation_pos + overlap = %d' % (separation_pos + overlap)
@@ -3532,19 +5720,3 @@ def _zoom_bbox(bbox, scale):
                         int(round(0 if v.stop is None else v.stop * scale)), \
                         int(round(0 if v.step is None else v.step * scale)) if v.step else None) \
                                     for v in bbox])
-
-
-# def _zoom_bbox(bbox, scale, target_size=None, is_downscale=True):
-#     def _even_check(v, t):
-#         return int(round(v * scale)) if t % 2 == 0 else int(round(v * scale)) - 1
-#
-#     if is_downscale:
-#         return tuple([slice(int(round(v.start * scale)), \
-#                             int(round(v.stop * scale)), \
-#                             int(round(v.step * scale)) if v.step else None) \
-#                      for v in bbox])
-#     else:
-#         return tuple([slice(_even_check(v.start * scale, t), \
-#                             _even_check(v.stop * scale, t), \
-#                             _even_check(v.step * scale, t) if v.step else None) \
-#                     for v, t in bbox, target_size])

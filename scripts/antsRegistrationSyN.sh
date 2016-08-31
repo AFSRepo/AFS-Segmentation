@@ -64,21 +64,21 @@ Optional arguments:
      -n:  Number of threads (default = 1)
 
      -t:  transform type (default = 's')
-         t: translation
-         k: similarity
-         r: rigid
-         a: rigid + affine
-         s: rigid + affine + deformable syn
-         b: rigid + affine + deformable b-spline syn
-         d: similarity + deformable b-spline syn
-         v: similarity + time varying velocity field
-         g: rigid + similarity + deformable b-spline syn (fast)
-         y: similarity + deformable b-spline syn (fast)
-         h: rigid + similarity
+        t: translation
+        r: rigid
+        a: rigid + affine
+        s: rigid + affine + deformable syn
+        sr: rigid + deformable syn
+        so: deformable syn only
+        b: rigid + affine + deformable b-spline syn
+        br: rigid + deformable b-spline syn
+        bo: deformable b-spline syn only
 
      -r:  radius for cross correlation metric used during SyN stage (default = 4)
 
      -s:  spline distance for deformable B-spline SyN transform (default = 26)
+
+     -x:  mask for the fixed image space
 
      -p:  precision type (default = 'd')
         f: float
@@ -138,20 +138,20 @@ Optional arguments:
 
      -t:  transform type (default = 's')
         t: translation
-        k: similarity
         r: rigid
         a: rigid + affine
         s: rigid + affine + deformable syn
+        sr: rigid + deformable syn
+        so: deformable syn only
         b: rigid + affine + deformable b-spline syn
-        d: similarity + deformable b-spline syn
-        v: similarity + time varying velocity field
-        g: rigid + similarity + deformable b-spline syn (fast)
-        y: similarity + deformable b-spline syn (fast)
-        h: rigid + similarity
+        br: rigid + deformable b-spline syn
+        bo: deformable b-spline syn only
 
      -r:  radius for cross correlation metric used during SyN stage (default = 4)
 
      -s:  spline distance for deformable B-spline SyN transform (default = 26)
+
+     -x:  mask for the fixed image space
 
      -p:  precision type (default = 'd')
         f: float
@@ -218,26 +218,16 @@ REPORTMAPPINGPARAMETERS
 }
 
 cleanup()
-# example cleanup function
 {
-
-  cd ${currentdir}/
-
   echo "\n*** Performing cleanup, please wait ***\n"
 
-# 1st attempt to kill all remaining processes
-# put all related processes in array
-runningANTSpids=( `ps -C antsRegistration | awk '{ printf "%s\n", $1 ; }'` )
+    runningANTSpids=$( ps --ppid $$ -o pid= )
 
-# debug only
-  #echo list 1: ${runningANTSpids[@]}
-
-# kill these processes, skip the first since it is text and not a PID
-for (( i = 1; i < ${#runningANTSpids[@]}; i++ ))
+  for thePID in $runningANTSpids
   do
-    echo "killing:  ${runningANTSpids[${i}]}"
-    kill ${runningANTSpids[${i}]}
-done
+      echo "killing:  ${thePID}"
+      kill ${thePID}
+  done
 
   return $?
 }
@@ -272,13 +262,12 @@ NUMBEROFTHREADS=1
 SPLINEDISTANCE=26
 TRANSFORMTYPE='s'
 PRECISIONTYPE='d'
+CCRADIUS=4
+MASK=0
 USEHISTOGRAMMATCHING=0
-CCRADIUS=3
-#CCRADIUS=5
-CONVWIN=10
 
 # reading command line arguments
-while getopts "d:f:h:j:m:n:o:p:r:s:t:" OPT
+while getopts "d:f:h:m:j:n:o:p:r:s:t:x:" OPT
   do
   case $OPT in
       h) #help
@@ -287,6 +276,9 @@ while getopts "d:f:h:j:m:n:o:p:r:s:t:" OPT
    ;;
       d)  # dimensions
    DIM=$OPTARG
+   ;;
+      x)  # inclusive mask
+   MASK=$OPTARG
    ;;
       f)  # fixed image
    FIXEDIMAGES[${#FIXEDIMAGES[@]}]=$OPTARG
@@ -393,66 +385,41 @@ for (( i=0; i<${#SIZE[@]}; i++ ))
 #
 ##############################
 
-TRANSLATIONCONVERGENCE="[1000x500x500,1e-7,10]"
-TRANSLATIONSHRINKFACTORS="3x2x1"
-TRANSLATIONSMOOTHINGSIGMAS="2x1x0vox"
+RIGIDCONVERGENCE="[1000x500x250x100,1e-6,10]"
+RIGIDSHRINKFACTORS="8x4x2x1"
+RIGIDSMOOTHINGSIGMAS="3x2x1x0vox"
 
-RIGIDCONVERGENCE="[1000x500x500,1e-7,10]"
-RIGIDSHRINKFACTORS="3x2x1"
-RIGIDSMOOTHINGSIGMAS="2x1x0vox"
+AFFINECONVERGENCE="[1000x500x250x100,1e-6,10]"
+AFFINESHRINKFACTORS="8x4x2x1"
+AFFINESMOOTHINGSIGMAS="3x2x1x0vox"
 
-AFFINECONVERGENCE="[1000x1000x1000x1000x1000,1e-7,10]"
-AFFINESHRINKFACTORS="5x4x3x2x1"
-AFFINESMOOTHINGSIGMAS="4x3x2x1x0vox"
-
-SIMILARITYCONVERGENCE="[1000x1000x1000x1000x1000,1e-7,10]"
-SIMILARITYSHRINKFACTORS="5x4x3x2x1"
-SIMILARITYSMOOTHINGSIGMAS="4x3x2x1x0vox"
-
-#SYNCONVERGENCEFAST="[500x300x150x250x0,1e-6,30]"
-SYNCONVERGENCEFAST="[500x500x500x500x0,1e-6,10]"
-#SYNCONVERGENCE="[500x500x500x500,1e-6,10]"
-SYNCONVERGENCE="[500x500x500x500x500,1e-6,10]"
-SYNSHRINKFACTORS="5x4x3x2x1"
-SYNSMOOTHINGSIGMAS="4x3x2x1x0vox"
+SYNCONVERGENCE="[500x500x500x500,1e-6,10]"
+SYNSHRINKFACTORS="8x4x2x1"
+SYNSMOOTHINGSIGMAS="3x2x1x0vox"
 
 if [[ $ISLARGEIMAGE -eq 1 ]];
   then
-    TRANSLATIONCONVERGENCE="[1000x500x500x500,1e-7,20]"
-    TRANSLATIONSHRINKFACTORS="12x8x4x2"
-    TRANSLATIONSMOOTHINGSIGMAS="4x3x2x1vox"
-
-    RIGIDCONVERGENCE="[1000x500x500x500,1e-6,10]"
+    RIGIDCONVERGENCE="[1000x500x250x100,1e-6,10]"
     RIGIDSHRINKFACTORS="12x8x4x2"
     RIGIDSMOOTHINGSIGMAS="4x3x2x1vox"
 
-    AFFINECONVERGENCE="[1000x500x500x500,1e-6,10]"
-    AFFINESHRINKFACTORS="8x4x2x1"
-    AFFINESMOOTHINGSIGMAS="3x2x1x0vox"
+    AFFINECONVERGENCE="[1000x500x250x100,1e-6,10]"
+    AFFINESHRINKFACTORS="12x8x4x2"
+    AFFINESMOOTHINGSIGMAS="4x3x2x1vox"
 
-    SIMILARITYCONVERGENCE="[1000x1000x1000x800,1e-6,10]"
-    SIMILARITYSHRINKFACTORS="8x4x2x1"
-    SIMILARITYSMOOTHINGSIGMAS="3x2x1x0vox"
-
-    # SYNCONVERGENCEFAST="[500x300x300x200x0,1e-6,10]"
-    # SYNCONVERGENCE="[500x500x500x500x500,1e-6,10]"
-    # SYNSHRINKFACTORS="5x4x3x2x1"
-    # SYNSMOOTHINGSIGMAS="4x3x2x1x0vox"
-    SYNCONVERGENCEFAST="[500x500x500x500x500x0,1e-6,10]"
-    SYNCONVERGENCE="[500x500x500x500x500x500,1e-6,10]"
-    SYNSHRINKFACTORS="6x5x4x3x2x1"
-    SYNSMOOTHINGSIGMAS="5x4x3x2x1x0vox"
+    SYNCONVERGENCE="[500x500x500x500x500,1e-6,10]"
+    SYNSHRINKFACTORS="10x6x4x2x1"
+    SYNSMOOTHINGSIGMAS="5x3x2x1x0vox"
   fi
 
-TRANSLATIONSTAGE="--initial-moving-transform [${FIXEDIMAGES[0]},${MOVINGIMAGES[0]},1] \
-                  --transform Translation[0.1] \
-                  --metric MI[${FIXEDIMAGES[0]},${MOVINGIMAGES[0]},1,32,Regular,0.25] \
-                  --convergence $TRANSLATIONCONVERGENCE \
-                  --shrink-factors $TRANSLATIONSHRINKFACTORS \
-                  --smoothing-sigmas $TRANSLATIONSMOOTHINGSIGMAS"
+tx=Rigid
+if [[ $TRANSFORMTYPE == 't' ]] ; then
+  tx=Translation
+fi
 
-RIGIDSTAGE="--initial-moving-transform [${FIXEDIMAGES[0]},${MOVINGIMAGES[0]},1] \
-            --transform Rigid[0.1] \
+INITIALSTAGE="--initial-moving-transform [${FIXEDIMAGES[0]},${MOVINGIMAGES[0]},1]"
+
+RIGIDSTAGE="--transform ${tx}[0.1] \
             --metric MI[${FIXEDIMAGES[0]},${MOVINGIMAGES[0]},1,32,Regular,0.25] \
             --convergence $RIGIDCONVERGENCE \
             --shrink-factors $RIGIDSHRINKFACTORS \
@@ -464,84 +431,45 @@ AFFINESTAGE="--transform Affine[0.1] \
              --shrink-factors $AFFINESHRINKFACTORS \
              --smoothing-sigmas $AFFINESMOOTHINGSIGMAS"
 
-
-SIMILARITYSTAGE="--transform Similarity[0.1] \
-                 --metric MI[${FIXEDIMAGES[0]},${MOVINGIMAGES[0]},1,32,Regular,0.25] \
-                 --convergence $SIMILARITYCONVERGENCE \
-                 --shrink-factors $SIMILARITYSHRINKFACTORS \
-                 --smoothing-sigmas $SIMILARITYSMOOTHINGSIGMAS"
-
-if [[ $TRANSFORMTYPE == 'y' ]]
-  then
-    SIMILARITYSTAGE="--restrict-deformation 0x0x0x1x1x1x1 \
-                    ${SIMILARITYSTAGE}"
-  fi
-
-if [[ $TRANSFORMTYPE == 'k' || $TRANSFORMTYPE == 'd' || $TRANSFORMTYPE == 'v' || $TRANSFORMTYPE == 'y' ]];
-  then
-    SIMILARITYSTAGE="--initial-moving-transform [${FIXEDIMAGES[0]},${MOVINGIMAGES[0]},1] \
-                    ${SIMILARITYSTAGE}"
-  fi
-
 SYNMETRICS=''
 for(( i=0; i<${#FIXEDIMAGES[@]}; i++ ))
   do
     SYNMETRICS="$SYNMETRICS --metric CC[${FIXEDIMAGES[$i]},${MOVINGIMAGES[$i]},1,${CCRADIUS}]"
-    #SYNMETRICS="$SYNMETRICS --metric MI[${FIXEDIMAGES[$i]},${MOVINGIMAGES[$i]},1,32,Regular,0.25]"
-    #SYNMETRICS="$SYNMETRICS --metric MeanSquares[${FIXEDIMAGES[$i]},${MOVINGIMAGES[$i]},1,0] \
-    #            $SYNMETRICS --metric MI[${FIXEDIMAGES[$i]},${MOVINGIMAGES[$i]},1,32,Regular,0.25]"
-done
+  done
 
 SYNSTAGE="${SYNMETRICS} \
           --convergence $SYNCONVERGENCE \
           --shrink-factors $SYNSHRINKFACTORS \
           --smoothing-sigmas $SYNSMOOTHINGSIGMAS"
 
-if [[ $TRANSFORMTYPE == 'g' || $TRANSFORMTYPE == 'y' ]];
+if [[ $TRANSFORMTYPE == 'b' ]] || [[ $TRANSFORMTYPE == 'br' ]] || [[ $TRANSFORMTYPE == 'bo' ]];
   then
-    SYNSTAGE="${SYNMETRICS} \
-              --convergence $SYNCONVERGENCEFAST \
-              --shrink-factors $SYNSHRINKFACTORS \
-              --smoothing-sigmas $SYNSMOOTHINGSIGMAS"
+    SYNSTAGE="--transform BSplineSyN[0.1,${SPLINEDISTANCE},0,3] \
+             $SYNSTAGE"
   fi
 
-if [[ $TRANSFORMTYPE == 'v' ]];
+if [[ $TRANSFORMTYPE == 's' ]] || [[ $TRANSFORMTYPE == 'sr' ]] || [[ $TRANSFORMTYPE == 'so' ]];
   then
-    SYNSTAGE="--transform TimeVaryingVelocityField[0.1,8,1,0.0,0.05,0] \
-        $SYNSTAGE"
-else
-    SYNSTAGE="--transform BSplineSyN[0.1,${SPLINEDISTANCE},0,3] \
-              $SYNSTAGE"
+    SYNSTAGE="--transform SyN[0.1,3,0] \
+             $SYNSTAGE"
   fi
 
 STAGES=''
 case "$TRANSFORMTYPE" in
-"t")
-  STAGES="$TRANSLATIONSTAGE"
-  ;;
-"k")
-  STAGES="$SIMILARITYSTAGE"
-  ;;
-"r")
-  STAGES="$RIGIDSTAGE"
+"r" | "t")
+  STAGES="$INITIALSTAGE $RIGIDSTAGE"
   ;;
 "a")
-  STAGES="$RIGIDSTAGE $AFFINESTAGE"
+  STAGES="$INITIALSTAGE $RIGIDSTAGE $AFFINESTAGE"
   ;;
 "b" | "s")
-  STAGES="$RIGIDSTAGE $AFFINESTAGE $SYNSTAGE"
+  STAGES="$INITIALSTAGE $RIGIDSTAGE $AFFINESTAGE $SYNSTAGE"
   ;;
-"d" | "v")
-  STAGES="$SIMILARITYSTAGE $SYNSTAGE"
+"br" | "sr")
+  STAGES="$INITIALSTAGE $RIGIDSTAGE  $SYNSTAGE"
   ;;
-"g")
-  STAGES="$RIGIDSTAGE $SIMILARITYSTAGE $SYNSTAGE"
-  ;;
-"y")
-  STAGES="$SIMILARITYSTAGE $SYNSTAGE"
-  ;;
-"h")
-  STAGES="$RIGIDSTAGE $SIMILARITYSTAGE"
+"bo" | "so")
+  STAGES="$INITIALSTAGE $SYNSTAGE"
   ;;
 *)
   echo "Transform type '$TRANSFORMTYPE' is not an option.  See usage: '$0 -h 1'"
@@ -563,12 +491,21 @@ case "$PRECISIONTYPE" in
   ;;
 esac
 
+
+if [[ ${#MASK} -lt 3 ]] ; then
+  MASK=""
+else
+  MASK=" -x $MASK "
+fi
+
+
 COMMAND="${ANTS} --verbose 1 \
                  --dimensionality $DIM $PRECISION \
-                 --output [$OUTPUTNAME,${OUTPUTNAME}Warped.nii.gz] \
+                 --output [$OUTPUTNAME,${OUTPUTNAME}Warped.nii.gz,${OUTPUTNAME}InverseWarped.nii.gz] \
                  --interpolation BSpline \
-                 --winsorize-image-intensities [0.005,0.995] \
                  --use-histogram-matching ${USEHISTOGRAMMATCHING} \
+                 --winsorize-image-intensities [0.005,0.995] \
+                 ${MASK} \
                  $STAGES"
 
 echo " antsRegistration call:"

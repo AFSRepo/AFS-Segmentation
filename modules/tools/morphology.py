@@ -239,18 +239,20 @@ def object_counter(stack_binary_data):
 
     return objects_stats, labeled_stack
 
-@timing
-def cell_counter(slice_binary_data, min_area=0.0, min_circularity=0.0, slice_index=-1):
-    print 'Object counting - Labeling...'
+def cell_counter(slice_binary_data, min_area=0.0, min_circularity=0.0, slice_index=-1, debug=True):
+    if debug: print 'Object counting - Labeling...'
+
     labeled_data, num_labels = label(slice_binary_data)
 
     if not num_labels:
         return pd.DataFrame(), np.zeros(slice_binary_data.shape)
 
-    print 'Object counting - BBoxing...'
+    if debug: print 'Object counting - BBoxing...'
+
     bboxes_labels = [BBox(bb_obj) for bb_obj in find_objects(labeled_data)]
 
-    print 'Object counting - Centers of masses...'
+    if debug: print 'Object counting - Centers of masses...'
+
     center_of_mass_labels = center_of_mass(slice_binary_data, labeled_data, np.arange(1, num_labels+1))
 
     objects_stats = pd.DataFrame(columns=_MEASUREMENTS_VALS)
@@ -260,7 +262,8 @@ def cell_counter(slice_binary_data, min_area=0.0, min_circularity=0.0, slice_ind
                             for _measure in _MEASUREMENTS_VALS}, \
                                 ignore_index=True)
 
-    print 'Object counting - Extra stats gathering...'
+    if debug: print 'Object counting - Extra stats gathering...'
+
     for _measure_extra in _MEASUREMENTS_EXTRA_VALS_2D:
         if _measure_extra == 'circularity':
             objects_stats[_measure_extra] = objects_stats.apply(lambda row: \
@@ -346,6 +349,46 @@ def extract_largest_area_data(stack_data, stack_stats, bb_side_offset=0, \
             filtered_stats['label'].values[0], bb_side_offset=bb_side_offset, \
                 force_bbox_fit=force_bbox_fit, pad_data=pad_data, \
                     extract_axes=extract_axes, force_positiveness=force_positiveness)
+
+def extract_label_by_name(stack_labels, label_name='brain'):
+    label_marker = 1 if label_name == 'brain' else 2
+    labels = (stack_labels == label_marker).astype(np.uint8)
+    return labels
+
+def extract_largest_volume_by_label(stack_data, stack_labels, bb_side_offset=0):
+    stack_stats, _ = object_counter(stack_labels)
+    print "INPUT extract_largest_volume_by_label = %s" % str(stack_data.shape)
+    largest_volume_region, bbox, _ = extract_largest_area_data(stack_data, stack_stats, bb_side_offset)
+    print "BBOX extract_largest_volume_by_label = %s" % str(bbox)
+
+    return largest_volume_region, bbox
+
+def extract_effective_volume(stack_data, eyes_stats=None, bb_side_offset=0):
+    timer_total = Timer()
+
+    timer = Timer()
+    print 'Binarizing...'
+    binarized_stack, bbox, eyes_stats = binarizator(stack_data)
+    print bbox
+    print binarized_stack.shape
+    binarized_stack.tofile('/home/rshkarin/ANKA_work/AFS-playground/Segmentation/fish200/fish_binary_%s.raw' \
+            % str(binarized_stack.shape))
+    timer.elapsed('Binarizing')
+
+    timer = Timer()
+    print 'Object counting...'
+    binary_stack_stats, _ = object_counter(binarized_stack)
+    timer.elapsed('Object counting')
+
+    timer = Timer()
+    print 'Big volume extraction...'
+    largest_volume_region, largest_volume_region_bbox = extract_largest_area_data(stack_data, binary_stack_stats, bb_side_offset)
+    print largest_volume_region_bbox
+    timer.elapsed('Big volume extraction')
+
+    timer_total.elapsed('Total')
+
+    return largest_volume_region, largest_volume_region_bbox
 
 def _calc_sphericity(area, perimeter):
     r = ((3.0 * area) / (4.0 * np.pi)) ** (1.0/3.0)

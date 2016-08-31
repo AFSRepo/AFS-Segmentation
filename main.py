@@ -13,10 +13,12 @@ from modules.tools.processing import get_fish_project_folder, get_fish_path
 from modules.tools.misc import Timer
 from modules.tools.morphology import object_counter, gather_statistics, extract_largest_area_data
 from modules.segmentation.eyes import eyes_statistics, eyes_zrange
-from modules.segmentation.spine import run_spine_segmentation
 from modules.segmentation.common import split_fish, align_fish
 from modules.segmentation.common import crop_align_data, brain_segmentation, \
-brain_segmentation_nifty, brain_segmentation_ants, full_body_registration_ants
+brain_segmentation_nifty, brain_segmentation_ants, full_body_registration_ants,\
+heart_segmentation_ants, simple_heart_segmentation_ants, \
+abdomen_based_heart_segmentation_ants, brain_segmentation_ants_v2, \
+spine_segmentation, organs_segmentation_ants, gather_volume_statistics
 from scipy.ndimage.measurements import label, find_objects
 from scipy.ndimage.interpolation import zoom, rotate
 import pandas as pd
@@ -24,7 +26,6 @@ import pdb
 import shutil
 
 #TODO:
-# 1. Sparate and pick up files by zoom level somehow.
 
 class FishDataEnv:
     def __init__(self, reference_project_path, reference_input_path, \
@@ -68,15 +69,15 @@ def _build_fish_env(reference_fish_num, target_fish_num, zoom_level=2):
 
 def _build_fish_data_paths():
     data = []
-    ######################################################### Correct
-    data.append(_build_fish_env(202, 243, zoom_level=2))
-    data.append(_build_fish_env(202, 204, zoom_level=2))
+    ######################### Correct ################################
     data.append(_build_fish_env(233, 238, zoom_level=2))
     data.append(_build_fish_env(233, 230, zoom_level=2))
     data.append(_build_fish_env(233, 231, zoom_level=2))
-    data.append(_build_fish_env(200, 215, zoom_level=2))
     data.append(_build_fish_env(233, 223, zoom_level=2))
     data.append(_build_fish_env(233, 226, zoom_level=2))
+    data.append(_build_fish_env(200, 215, zoom_level=2))
+    data.append(_build_fish_env(202, 243, zoom_level=2))
+    data.append(_build_fish_env(202, 204, zoom_level=2))
     ###################################################################
 
     # data.append(_build_fish_env(202, 238, zoom_level=2))
@@ -96,14 +97,16 @@ def _build_fish_data_paths():
 def clean_version_run_brain_segmentation_unix(useAnts=True):
     fishes_envs = _build_fish_data_paths()
 
-    print 'PEW PEW PEW FIST LAUNCH OF AUTO-BRAIN SEGMENTATION!'
+    print 'PEW PEW PEW FIRST LAUNCH OF AUTO SEGMENTATION!'
     for fish_env in fishes_envs:
         print '############################# Fish %d -> Fish %d ###################################' % \
                                 (fish_env.reference_fish_num, fish_env.target_fish_num)
 
         if useAnts:
-            #full_body_registration_ants(fish_env.reference_data_env, fish_env.target_data_env)
-            brain_segmentation_ants(fish_env.reference_data_env, fish_env.target_data_env)
+            gather_volume_statistics(fish_env.reference_data_env, fish_env.target_data_env)
+            # spine_segmentation(fish_env.reference_data_env, fish_env.target_data_env, com_dist_tolerance=5, min_area=5.0, min_circularity=0.4)
+            # brain_segmentation_ants_v2(fish_env.reference_data_env, fish_env.target_data_env)
+            # organs_segmentation_ants(fish_env.reference_data_env, fish_env.target_data_env)
         else:
             brain_segmentation_nifty(fish_env.reference_data_env, fish_env.target_data_env)
 

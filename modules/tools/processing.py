@@ -31,8 +31,11 @@ def binarizator(stack_data, eyes_stats=None, filter_size=6,
 
     print 'Binarizing - Thresholding...'
     for slice_idx in np.arange(num_slices):
-        threshold_global_otsu = threshold_otsu(stack_data[slice_idx])
-        thresholded_stack[slice_idx] = stack_data[slice_idx] >= threshold_global_otsu
+        if np.count_nonzero(stack_data[slice_idx]):
+            threshold_global_otsu = threshold_otsu(stack_data[slice_idx])
+            thresholded_stack[slice_idx] = stack_data[slice_idx] >= threshold_global_otsu
+        else:
+            thresholded_stack[slice_idx] = np.zeros_like(stack_data[slice_idx])
 
     print 'Binarizing - Nonzeros, Closing, Filling, Medianing...'
     for slice_idx in np.arange(num_slices):
@@ -176,6 +179,49 @@ def _get_rot_matrix_arbitrary_axis(ux, uy, uz, theta):
                      np.cos(theta)+uz*uz*(1.-np.cos(theta))]], dtype=np.float32)
 
     return mat
+
+# def rotate_around_vector(data, origin_point, rot_axis, angle, interp_order=3):
+#     dims = data.shape
+#     interp_data = np.zeros_like(data)
+#
+#     R = _get_rot_matrix_arbitrary_axis(rot_axis[0], rot_axis[1], rot_axis[2], angle)
+#
+#     progress_counter = 0
+#     data_len = float(dims[0]*dims[1]*dims[2])
+#     interp_order = 5
+#
+#     for x in xrange(dims[2]):
+#         for y in xrange(dims[1]):
+#             for z in xrange(dims[0]):
+#                 t = Timer()
+#
+#                 coordinates_translated = np.array([[x - origin_point[0]], \
+#                                                    [y - origin_point[1]], \
+#                                                    [z - origin_point[2]]])
+#
+#                 coordinates_rotated = np.array(R * coordinates_translated, dtype=np.float32)
+#
+#                 coordinates_rotated[0] = coordinates_rotated[0] + origin_point[0]
+#                 coordinates_rotated[1] = coordinates_rotated[1] + origin_point[1]
+#                 coordinates_rotated[2] = coordinates_rotated[2] + origin_point[2]
+#
+#                 interp_data[z,y,x] = map_coordinates(data, coordinates_rotated, order=interp_order)
+#
+#                 # rz, ry, rx = round(coordinates_rotated[2]), round(coordinates_rotated[1]), round(coordinates_rotated[0])
+#                 #
+#                 # cz = rz >= 0 and rz < dims[0]
+#                 # cy = ry >= 0 and ry < dims[1]
+#                 # cx = rx >= 0 and rx < dims[2]
+#                 #
+#                 # interp_data[z,y,x] = data[rz, ry, rx] if cz and cy and cx else 0.0
+#
+#                 # t.elapsed('Point interpolation NearestNeighbor manual')
+#                 t.elapsed('Point interpolation Order=%d' % interp_order)
+#
+#                 progress_counter += 1
+#                 print "Rotation progress: {:.2f}".format(progress_counter / data_len * 100.)
+#
+#     return interp_data, R, origin_point
 
 def rotate_around_vector(data, origin_point, rot_axis, angle, interp_order=3):
     dims = data.shape
@@ -324,7 +370,7 @@ def _calc_approx_eyes_params(data_shape):
 
     return min_area, min_sphericity
 
-def check_depth_orientation(data, data_label=None, is_tail_fisrt=True):
+def check_depth_orientation(data, data_label=None, data_organs_labels=None, is_tail_fisrt=True):
     print_available_ram()
 
     print 'Depth orientation correction - Finding eyes...'
@@ -341,10 +387,21 @@ def check_depth_orientation(data, data_label=None, is_tail_fisrt=True):
     if data_label is not None:
         flipped_data_label, flipped_label = _flip_z(data_label, eyes_stats, is_tail_fisrt=is_tail_fisrt)
 
+    flipped_data_organs_labels, flipped_organs_labels = {}, {}
+    if data_organs_labels:
+        for organ_name, data_organ_label in data_organs_labels.iteritems():
+            flipped_data_organ_label, flipped_organ_label = _flip_z(data_organ_label, eyes_stats, is_tail_fisrt=is_tail_fisrt)
+            flipped_data_organs_labels[organ_name] = flipped_data_organ_label
+            flipped_organs_labels[organ_name] = flipped_organ_label
+
     del thresholded_data, data
 
     if data_label is not None:
         del data_label
+
+    if data_organs_labels:
+        for organ_name, data_organ_label in data_organs_labels.iteritems():
+            del data_organ_label
 
     print_available_ram()
 
@@ -353,10 +410,10 @@ def check_depth_orientation(data, data_label=None, is_tail_fisrt=True):
 
     print_available_ram()
 
-    return flipped_data, flipped_data_label, eyes_stats
+    return flipped_data, flipped_data_label, flipped_data_organs_labels, eyes_stats
 
 
-def check_vertical_orientation(data, data_label=None, eyes_stats=None):
+def check_vertical_orientation(data, data_label=None, data_organs_labels=None, eyes_stats=None):
     if eyes_stats is None:
         print 'Vectical orientation correction - Finding eyes...'
         stack_statistics, thresholded_data = gather_statistics(data)
@@ -378,16 +435,26 @@ def check_vertical_orientation(data, data_label=None, eyes_stats=None):
     if data_label is not None:
         flipped_data_label = data_label[:,::-1,:] if flipped else data_label
 
+    flipped_data_organs_labels = {}
+    if data_organs_labels:
+        for organ_name, data_organ_label in data_organs_labels.iteritems():
+            flipped_data_organs_labels[organ_name] = data_organ_label[:,::-1,:] if flipped else data_organ_label
+
     del data
+
     if data_label is not None:
         del data_label
+
+    if data_organs_labels:
+        for organ_name, data_organ_label in data_organs_labels.iteritems():
+            del data_organ_label
 
     if flipped:
         eyes_stats = flip_stats(eyes_stats, flipped_data.shape, axes=(1,))
 
-    return flipped_data, flipped_data_label, eyes_stats
+    return flipped_data, flipped_data_label, flipped_data_organs_labels, eyes_stats
 
-def _align_by_eyes_centroids(data, centroids, data_label=None, interp_order=3):
+def _align_by_eyes_centroids(data, centroids, data_label=None, data_organs_labels=None, interp_order=3):
     dims = data.shape
     eye_l, eye_r = centroids
 
@@ -413,9 +480,15 @@ def _align_by_eyes_centroids(data, centroids, data_label=None, interp_order=3):
     if data_label is not None:
         interp_data_label, _, _ = rotate_around_vector(data_label, eye_c, rot_axis, -theta, interp_order=0)
 
-    return interp_data, interp_data_label, R, origin_point
+    interp_data_organs_labels = {}
+    if data_organs_labels:
+        for organ_name, data_organ_label in data_organs_labels.iteritems():
+            interp_data_organ_label, _, _ = rotate_around_vector(data_organ_label, eye_c, rot_axis, -theta, interp_order=0)
+            interp_data_organs_labels[organ_name] = interp_data_organ_label
 
-def align_eyes_centroids(data, data_label=None, eyes_stats=None):
+    return interp_data, interp_data_label, interp_data_organs_labels, R, origin_point
+
+def _partly_align_eyes_centroids(data, data_label=None, eyes_stats=None):
     print_available_ram()
 
     if eyes_stats is None:
@@ -461,13 +534,67 @@ def align_eyes_centroids(data, data_label=None, eyes_stats=None):
 
     return aligned_data, aligned_data_label, aligned_eyes_stats
 
-def align_tail_part(input_data, input_data_label=None, landmark_tail_idx_frac=0.56383, spinal_angle=0.12347, interp_order=3, bb_side_offset=20):
+def align_eyes_centroids(data, data_label=None, data_organs_labels=None, eyes_stats=None):
+    print_available_ram()
+
+    if eyes_stats is None:
+        print 'Aligning of eyes\' centroids - Finding eyes...'
+        stack_statistics, thresholded_data = gather_statistics(data)
+        min_area, min_sphericity = _calc_approx_eyes_params(data.shape)
+        eyes_stats = eyes_statistics(stack_statistics, min_area=min_area, min_sphericity=min_sphericity)
+        del thresholded_data
+
+    print_available_ram()
+
+    print 'Aligning of eyes\' centroids - Stats extracting...'
+    eye1_com, eye2_com = np.array([eyes_stats['com_x'].values[0], eyes_stats['com_y'].values[0], eyes_stats['com_z'].values[0]]), \
+                             np.array([eyes_stats['com_x'].values[1], eyes_stats['com_y'].values[1], eyes_stats['com_z'].values[1]])
+    eyes_coms = [eye1_com, eye2_com]
+
+    print_available_ram()
+
+    eye1_sbbox, eye2_sbbox = np.array([eyes_stats['bb_width'].values[0], eyes_stats['bb_height'].values[0], eyes_stats['bb_depth'].values[0]]), \
+                                 np.array([eyes_stats['bb_width'].values[1], eyes_stats['bb_height'].values[1], eyes_stats['bb_depth'].values[1]])
+    eyes_sizes = [eye1_sbbox, eye2_sbbox]
+
+    print_available_ram()
+
+    print 'Aligning of eyes\' centroids - Aligning along x- and y-axes...'
+    aligned_data, aligned_data_label, aligned_data_organs_labels, R, origin_point  = \
+                                _align_by_eyes_centroids(data, eyes_coms, data_label=data_label, \
+                                            data_organs_labels=data_organs_labels)
+
+    del data
+
+    if data_label is not None:
+        del data_label
+
+    if data_organs_labels:
+        for organ_name, data_organ_label in data_organs_labels.iteritems():
+            del data_organ_label
+
+    print_available_ram()
+
+    aligned_eyes_stats = rotate_stats(eyes_stats, R, origin_point)
+
+    del R
+
+    print_available_ram()
+
+    return aligned_data, aligned_data_label, aligned_data_organs_labels, aligned_eyes_stats
+
+def align_tail_part(input_data, input_data_label=None, input_data_organs_labels=None, landmark_tail_idx_frac=0.56383, spinal_angle=0.12347, interp_order=3, bb_side_offset=20):
     print 'Aligning of tail part - Extracting z-bounded data...'
     data_type = input_data.dtype
 
     data_label_type = None
     if input_data_label is not None:
         data_label_type = input_data_label.dtype
+
+    data_organs_labels_types = {}
+    if input_data_organs_labels:
+        for organ_name, data_organ_label in input_data_organs_labels.iteritems():
+            data_organs_labels_types[organ_name] = data_organ_label.dtype
 
     binarized_stack, bbox, eyes_stats = binarizator(input_data)
     binary_stack_stats, thresholded_data = object_counter(binarized_stack)
@@ -480,11 +607,17 @@ def align_tail_part(input_data, input_data_label=None, landmark_tail_idx_frac=0.
 
     largest_volume_region_label = None
     if input_data_label is not None:
-        largest_volume_region_label, _, _ = \
+        largest_volume_region_label, _, largest_volume_region_bbox = \
                         extract_largest_area_data(input_data_label, binary_stack_stats, bb_side_offset=bb_side_offset, \
                                                   force_bbox_fit=False, pad_data=True, extract_axes=(0,), \
                                                   force_positiveness=False)
         del input_data_label
+
+    largest_volume_regions_organs_labels = {}
+    if input_data_organs_labels:
+        for organ_name, data_organ_label in input_data_organs_labels.iteritems():
+            largest_volume_regions_organs_labels[organ_name] = data_organ_label[largest_volume_region_bbox]
+            del data_organ_label
 
     print 'Aligning of tail part - Finding eyes...'
     stack_statistics, inversed_thresholded_data = gather_statistics(largest_volume_region)
@@ -537,6 +670,11 @@ def align_tail_part(input_data, input_data_label=None, landmark_tail_idx_frac=0.
 
         del largest_volume_region_label
 
+    data_organs_labels_rotated = {}
+    if largest_volume_regions_organs_labels:
+        for organ_name, data_organ_label in largest_volume_regions_organs_labels.iteritems():
+            data_organ_label_rotated, _, _ = rotate_around_vector(data_organ_label, eye_c, rot_axis, theta, interp_order=0)
+            data_organs_labels_rotated[organ_name] = data_organ_label_rotated
 
     print 'Aligning of tail part - Extracting aligned data...'
     data_rotated_binarized_stack, _, _ = binarizator(data_rotated)
@@ -564,12 +702,21 @@ def align_tail_part(input_data, input_data_label=None, landmark_tail_idx_frac=0.
 
         del data_label_rotated
 
+    largest_data_organs_labels_rotated_regions = {}
+    if data_organs_labels_rotated:
+        for organ_name, data_organ_label_rotated in data_organs_labels_rotated.iteritems():
+            data_type = data_organs_labels_types[organ_name]
+            largest_data_organs_labels_rotated_regions[organ_name] = \
+                        data_organ_label_rotated[extration_bbox].astype(data_type)
+            del data_organ_label_rotated
+
     largest_data_rotated_region = largest_data_rotated_region.astype(data_type)
 
     if largest_data_label_rotated_region is not None:
         largest_data_label_rotated_region = largest_data_label_rotated_region.astype(data_label_type)
 
-    return largest_data_rotated_region, largest_data_label_rotated_region, extration_bbox
+    return largest_data_rotated_region, largest_data_label_rotated_region, \
+                largest_data_organs_labels_rotated_regions, extration_bbox
 
 TMP_PATH = "C:\\Users\\Administrator\\Documents\\tmp"
 #filepath = "C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish200\\fish200_rotated_32bit_286x286x1235.raw"
@@ -699,51 +846,69 @@ def align_fish_by_eyes_tail___(input_data, landmark_tail_idx_frac=0.56383, spina
     return tail_aligned_data
 
 @timing
-def align_fish_by_eyes_tail(input_data, input_data_label=None, landmark_tail_idx_frac=0.56383, spinal_angle=0.12347, interp_order=3, bb_side_offset=20):
-    flipped_z_data, flipped_z_data_label, flipped_z_eyes_stats = \
-        check_depth_orientation(input_data, data_label=input_data_label)
+def align_fish_by_eyes_tail(input_data, input_data_label=None, input_data_organs_labels=None, landmark_tail_idx_frac=0.56383, spinal_angle=0.12347, interp_order=3, bb_side_offset=20):
+    flipped_z_data, flipped_z_data_label, flipped_z_data_organs_labels, flipped_z_eyes_stats = \
+        check_depth_orientation(input_data, data_label=input_data_label, data_organs_labels=input_data_organs_labels)
 
+    print 'NONE? flipped_z_data = %s, flipped_z_data_label = %s, flipped_z_data_organs_labels = %s' % \
+                (str(flipped_z_data is None), str(flipped_z_data_label is None), str(flipped_z_data_organs_labels == {}))
 
-    print 'flipped_z_data_label is None = %s' % str(flipped_z_data_label is None)
+    aligned_data, aligned_data_label, aligned_data_organs_labels, aligned_eyes_stats = \
+        align_eyes_centroids(flipped_z_data, data_label=flipped_z_data_label, \
+                                data_organs_labels=flipped_z_data_organs_labels,\
+                                    eyes_stats=flipped_z_eyes_stats)
 
-    aligned_data, aligned_data_label, aligned_eyes_stats = \
-        align_eyes_centroids(flipped_z_data, data_label=flipped_z_data_label, eyes_stats=flipped_z_eyes_stats)
-
-    print 'aligned_data_label is None = %s' % str(aligned_data_label is None)
+    print 'NONE? aligned_data = %s, aligned_data_label = %s, aligned_data_organs_labels = %s' % \
+                (str(aligned_data is None), str(aligned_data_label is None), str(aligned_data_organs_labels == {}))
 
     del flipped_z_data, flipped_z_eyes_stats
 
     if flipped_z_data_label is not None:
         del flipped_z_data_label
 
-    flipped_y_data, flipped_y_data_label, flipped_y_eyes_stats = \
-                                            check_vertical_orientation(aligned_data, \
-                                                                       data_label=aligned_data_label, \
-                                                                       eyes_stats=aligned_eyes_stats)
+    if flipped_z_data_organs_labels:
+        for organ_name, data_organ_label in flipped_z_data_organs_labels.iteritems():
+            del data_organ_label
 
-    print 'flipped_y_data_label is None = %s' % str(flipped_y_data_label is None)
+    flipped_y_data, flipped_y_data_label, flipped_y_data_organs_labels, flipped_y_eyes_stats = \
+                    check_vertical_orientation(aligned_data, data_label=aligned_data_label, \
+                                                data_organs_labels=aligned_data_organs_labels, \
+                                                    eyes_stats=aligned_eyes_stats)
+
+    print 'NONE? flipped_y_data = %s, flipped_y_data_label = %s, flipped_y_data_organs_labels = %s' % \
+                (str(flipped_y_data is None), str(flipped_y_data_label is None), str(flipped_y_data_organs_labels == {}))
 
     del aligned_data, aligned_eyes_stats
 
     if aligned_data_label is not None:
         del aligned_data_label
 
-    tail_aligned_data, tail_aligned_data_label, extration_bbox = \
+    if aligned_data_organs_labels:
+        for organ_name, data_organ_label in aligned_data_organs_labels.iteritems():
+            del data_organ_label
+
+    tail_aligned_data, tail_aligned_data_label, tail_aligned_data_organs_labels, extration_bbox = \
                                 align_tail_part(flipped_y_data, \
                                                 input_data_label=flipped_y_data_label, \
+                                                input_data_organs_labels=flipped_y_data_organs_labels, \
                                                 landmark_tail_idx_frac=landmark_tail_idx_frac, \
                                                 spinal_angle=spinal_angle, \
                                                 interp_order=interp_order, \
                                                 bb_side_offset=bb_side_offset)
 
-    print 'tail_aligned_data_label is None = %s' % str(tail_aligned_data_label is None)
+    print 'NONE? tail_aligned_data = %s, tail_aligned_data_label = %s, tail_aligned_data_organs_labels = %s' % \
+                (str(tail_aligned_data is None), str(tail_aligned_data_label is None), str(tail_aligned_data_organs_labels == {}))
 
     del flipped_y_data, flipped_y_eyes_stats
 
     if flipped_y_data_label is not None:
         del flipped_y_data_label
 
-    return tail_aligned_data, tail_aligned_data_label, extration_bbox
+    if flipped_y_data_organs_labels:
+        for organ_name, data_organ_label in flipped_y_data_organs_labels.iteritems():
+            del data_organ_label
+
+    return tail_aligned_data, tail_aligned_data_label, tail_aligned_data_organs_labels, extration_bbox
 
 def convert_fish(fish_number):
     print '----Converting fish #%d' % fish_number
@@ -884,8 +1049,8 @@ def get_aligned_fish_folder(fish_num, zoom_level=2):
 def get_fish_project_folder(fish_num):
     return os.path.join(OUTPUT_DIR, 'Segmentation', 'fish%d' % fish_num)
 
-def get_fish_path(fish_num, zoom_level=2, isLabel=False):
-    req_path = get_path_by_name(fish_num, os.path.join(INPUT_DIR, 'fish%d' % fish_num, '@%d' % zoom_level), isFindLabels=isLabel)
+def get_fish_path(fish_num, zoom_level=2, isLabel=False, label_prefix=None):
+    req_path = get_path_by_name(fish_num, os.path.join(INPUT_DIR, 'fish%d' % fish_num, '@%d' % zoom_level), isFindLabels=isLabel, label_prefix=label_prefix)
 
     if req_path is None:
         downsampled_data_path = None
@@ -893,7 +1058,7 @@ def get_fish_path(fish_num, zoom_level=2, isLabel=False):
         for zl in [i for i in [1,2,4,8] if i < zoom_level]: #[1,2,4,8] - zoom levels
             prev_zoom_level_data_path = get_path_by_name(fish_num, \
                                                   get_fish_folder(fish_num, zoom_level=zl), \
-                                                  isFindLabels=isLabel)
+                                                  isFindLabels=isLabel, label_prefix=label_prefix)
             if prev_zoom_level_data_path is not None:
                 downsampled_data_path = downsample_data(prev_zoom_level_data_path, \
                                                         get_fish_folder(fish_num, zoom_level=zoom_level), \
@@ -908,31 +1073,55 @@ def get_fish_path(fish_num, zoom_level=2, isLabel=False):
     else:
         return req_path
 
-def get_aligned_fish_paths(fish_num, zoom_level=2, min_zoom_level=2):
+def get_aligned_fish_paths(fish_num, zoom_level=2, min_zoom_level=2, organs_labels=None):
     data_req_path = get_path_by_name(fish_num, \
                                     get_aligned_fish_folder(fish_num, zoom_level=zoom_level))
     data_label_req_path = get_path_by_name(fish_num, \
                                     get_aligned_fish_folder(fish_num, zoom_level=zoom_level), \
                                     isFindLabels=True)
 
+    organs_labels_paths = {}
+    if organs_labels:
+        for organ in organs_labels:
+            organs_labels_paths[organ] = get_path_by_name(fish_num, \
+                                            get_aligned_fish_folder(fish_num, zoom_level=zoom_level), \
+                                            isFindLabels=True, label_prefix=organ)
+
     print '###########data_req_path = %s' % data_req_path
     print '###########data_label_req_path = %s' % data_label_req_path
+    print '###########organs_labels_paths = %s' % str(organs_labels_paths)
+
+    zoom_levels = [1,2,4,8]
+    #zoom_levels = [4,8]
 
     if data_req_path is None:
         downsampled_data_path, downsampled_data_label_path = None, None
+        downsampled_data_organs_labels_paths = {}
 
-        for zl in [i for i in [1,2,4,8] if i <= zoom_level]:
+        for zl in [i for i in zoom_levels if i <= zoom_level]:
             prev_zoom_level_data_path = get_path_by_name(fish_num, \
                                                          get_aligned_fish_folder(fish_num, zoom_level=zl))
 
             prev_zoom_level_data_label_path = get_path_by_name(fish_num, \
                                                                 get_aligned_fish_folder(fish_num, zoom_level=zl), \
                                                                 isFindLabels=True)
+            prev_zoom_level_data_organs_labels_paths = {}
+            if organs_labels:
+                for organ in organs_labels:
+                    prev_zoom_level_data_organs_labels_paths[organ] = get_path_by_name(fish_num, \
+                                                                        get_aligned_fish_folder(fish_num, zoom_level=zl), \
+                                                                        isFindLabels=True, label_prefix=organ)
 
             print 'prev_zoom_level_data_path = %s' % prev_zoom_level_data_path
             print 'prev_zoom_level_data_label_path = %s' % prev_zoom_level_data_label_path
+            print 'prev_zoom_level_data_organs_labels_paths = %s' % str(prev_zoom_level_data_organs_labels_paths)
 
-
+            # zoom_level/zl
+            # zoom_level - current level zoom we want to get
+            # zl - zoom level on previous available level
+            # e.g. we have 2nd level and we want to get 4th
+            # then we should zoom 2nd level by 4/2=2 times
+            # if we have 1st and want 4th, then 4/1=4 times
             if prev_zoom_level_data_path is not None:
                 downsampled_data_path = downsample_data(prev_zoom_level_data_path, \
                                                         get_aligned_fish_folder(fish_num, zoom_level=zoom_level), \
@@ -947,15 +1136,25 @@ def get_aligned_fish_paths(fish_num, zoom_level=2, min_zoom_level=2):
                                                                   order=0)
                     print 'downsampled_data_label_path = %s' % downsampled_data_label_path
 
+                if prev_zoom_level_data_organs_labels_paths:
+                    if organs_labels:
+                        for organ in organs_labels:
+                            downsampled_data_organs_labels_paths[organ] = \
+                                downsample_data(prev_zoom_level_data_organs_labels_paths[organ], \
+                                                    get_aligned_fish_folder(fish_num, zoom_level=zoom_level), \
+                                                        zoom_in_level=zoom_level/zl, \
+                                                            order=0)
+                    print 'downsampled_data_organs_labels_paths[] = %s' % str(downsampled_data_organs_labels_paths)
+
                 break
 
         if downsampled_data_path is not None:
-            return downsampled_data_path, downsampled_data_label_path
+            return downsampled_data_path, downsampled_data_label_path, downsampled_data_organs_labels_paths
         else:
-            produce_aligned_fish(fish_num, min_zoom_level=min_zoom_level)
-            return get_aligned_fish_paths(fish_num, zoom_level=zoom_level, min_zoom_level=min_zoom_level)
+            produce_aligned_fish(fish_num, min_zoom_level=min_zoom_level, organs_labels=organs_labels)
+            return get_aligned_fish_paths(fish_num, zoom_level=zoom_level, min_zoom_level=min_zoom_level, organs_labels=organs_labels)
     else:
-        return data_req_path, data_label_req_path
+        return data_req_path, data_label_req_path, organs_labels_paths
 
 def get_aligned_fish_path(fish_num, zoom_level=2, isLabel=False, min_zoom_level=2):
     req_path = get_path_by_name(fish_num, \
@@ -1021,11 +1220,20 @@ def scaling_aligning():
     fish_num_array = np.array([230, 231, 233, 238, 243])
     align_fishes(fish_num_array, output_zoom_dir, output_align_dir)
 
-def produce_aligned_fish(fish_num, min_zoom_level=2):
+def produce_aligned_fish(fish_num, min_zoom_level=2, organs_labels=None):
     print "--Produce aligned fish%d" % fish_num
     non_aligned_data_path, non_aligned_data_label_path = \
                     get_fish_path(fish_num, zoom_level=min_zoom_level), \
                     get_fish_path(fish_num, zoom_level=min_zoom_level, isLabel=True)
+
+    non_aligned_data_organs_labels_paths = {}
+    if organs_labels:
+        for organ in organs_labels:
+            non_aligned_data_organs_labels_paths[organ] = get_fish_path(fish_num, zoom_level=min_zoom_level, isLabel=True, label_prefix=organ)
+
+    print 'non_aligned_data_path = %s' % non_aligned_data_path
+    print 'non_aligned_data_label_path = %s' % non_aligned_data_label_path
+    print 'non_aligned_data_organs_labels_paths = %s' % str(non_aligned_data_organs_labels_paths)
 
     non_aligned_input_data = open_data(non_aligned_data_path)
 
@@ -1033,9 +1241,15 @@ def produce_aligned_fish(fish_num, min_zoom_level=2):
     if non_aligned_data_label_path is not None:
         non_aligned_input_data_label = open_data(non_aligned_data_label_path)
 
-    aligned_data, aligned_data_label, extration_bbox = \
+    non_aligned_input_data_organs_labels = {}
+    if non_aligned_data_organs_labels_paths:
+        for organ_name, orgal_label_path in non_aligned_data_organs_labels_paths.iteritems():
+            non_aligned_input_data_organs_labels[organ_name] = open_data(orgal_label_path)
+
+    aligned_data, aligned_data_label, aligned_data_organs_labels, extration_bbox = \
                 align_fish_by_eyes_tail(non_aligned_input_data, \
-                                        input_data_label=non_aligned_input_data_label)
+                                        input_data_label=non_aligned_input_data_label, \
+                                        input_data_organs_labels=non_aligned_input_data_organs_labels)
 
     name, bits, size, ext = parse_filename(non_aligned_data_path)
     output_file = create_filename_with_shape(non_aligned_data_path, \
@@ -1055,6 +1269,19 @@ def produce_aligned_fish(fish_num, min_zoom_level=2):
 
         aligned_data_label = aligned_data_label.astype('uint%d' % bits_label)
 
+    output_organs_labels_files = {}
+    if non_aligned_data_organs_labels_paths:
+        for organ_name, non_aligned_orgal_label_path in non_aligned_data_organs_labels_paths.iteritems():
+            name_label, bits_label, size_label, ext_label = parse_filename(non_aligned_orgal_label_path)
+            aligned_data_organs_labels[organ_name] = aligned_data_organs_labels[organ_name].astype('uint%d' % bits_label)
+            output_organ_label_file = create_filename_with_shape(non_aligned_orgal_label_path, \
+                                                                 aligned_data_organs_labels[organ_name].shape, \
+                                                                 prefix="aligned")
+            if bits_label != 8:
+                raise ValueError('Label data should be 8-bit.')
+
+            output_organs_labels_files[organ_name] = output_organ_label_file
+
     output_path = get_aligned_fish_folder(fish_num, zoom_level=min_zoom_level)
 
     if not os.path.exists(output_path):
@@ -1062,19 +1289,34 @@ def produce_aligned_fish(fish_num, min_zoom_level=2):
 
     output_data_path = os.path.join(output_path, output_file)
     aligned_data.tofile(output_data_path)
+    print output_data_path
 
     if output_label_file is not None:
         output_label_path = os.path.join(output_path, output_label_file)
         aligned_data_label.tofile(output_label_path)
+        print output_label_path
 
-def get_aligned_fish(fish_num, zoom_level=2, min_zoom_level=2):
-    input_aligned_data_path, input_aligned_data_label_path = get_aligned_fish_paths(fish_num, zoom_level=zoom_level, min_zoom_level=min_zoom_level)
+    if output_organs_labels_files:
+        for organ_name, output_organ_label_file in output_organs_labels_files.iteritems():
+            output_label_path = os.path.join(output_path, output_organ_label_file)
+            aligned_data_organs_labels[organ_name].tofile(output_label_path)
+            print output_label_path
+
+def get_aligned_fish(fish_num, zoom_level=2, min_zoom_level=2, organs_labels=None):
+    input_aligned_data_path, \
+    input_aligned_data_label_path, \
+    input_aligned_data_organs_labels_paths = \
+                get_aligned_fish_paths(fish_num, \
+                                       zoom_level=zoom_level, \
+                                       min_zoom_level=min_zoom_level, \
+                                       organs_labels=organs_labels)
 
     print 'zoom_level = %d' % zoom_level
     print 'min_zoom_level = %d' % min_zoom_level
 
-    print 'input_aligned_data_path = %s' % str(input_aligned_data_path)
-    print 'input_aligned_data_label_path = %s' % str(input_aligned_data_label_path)
+    print 'FINAL input_aligned_data_path = %s' % str(input_aligned_data_path)
+    print 'FINAL input_aligned_data_label_path = %s' % str(input_aligned_data_label_path)
+    print 'FINAL input_aligned_data_organs_labels_paths = %s' % str(input_aligned_data_organs_labels_paths)
 
     input_aligned_data = open_data(input_aligned_data_path)
 
@@ -1082,4 +1324,9 @@ def get_aligned_fish(fish_num, zoom_level=2, min_zoom_level=2):
     if input_aligned_data_label_path is not None:
         input_aligned_data_label = open_data(input_aligned_data_label_path)
 
-    return input_aligned_data, input_aligned_data_label
+    input_aligned_data_organs_labels = {}
+    if input_aligned_data_organs_labels_paths:
+        for organ_name, data_organ_path in input_aligned_data_organs_labels_paths.iteritems():
+            input_aligned_data_organs_labels[organ_name] = open_data(data_organ_path)
+
+    return input_aligned_data, input_aligned_data_label, input_aligned_data_organs_labels

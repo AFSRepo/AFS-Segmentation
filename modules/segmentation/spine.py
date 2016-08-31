@@ -2,18 +2,20 @@ import numpy as np
 import pandas as pd
 import os
 import sys
+from modules.tools.env import DataEnvironment
 from skimage.filters import threshold_adaptive, threshold_otsu, threshold_li
 from skimage.restoration import denoise_bilateral
 from skimage.draw import circle
 from scipy.ndimage.morphology import binary_opening, binary_fill_holes, binary_closing, generate_binary_structure
 from modules.tools.morphology import cell_counter, gather_statistics, extract_largest_area_data
+from modules.tools.morphology import extract_label_by_name, extract_largest_volume_by_label
 from scipy.ndimage.measurements import label, find_objects, center_of_mass
 from scipy.ndimage.filters import median_filter
 #import matplotlib.pyplot as plt
 import numpy.polynomial.polynomial as poly
 from mpl_toolkits.mplot3d import Axes3D
-from modules.tools.io import open_data
-from modules.tools.misc import timing
+from modules.tools.io import open_data, save_as_nifti, parse_filename
+from modules.tools.misc import timing, BBox
 
 def gen_ranges(s,arr):
     l = len(arr)
@@ -28,18 +30,48 @@ def gen_ranges(s,arr):
 
     return out
 
-def get_empty_indices(binary_spine_data):
+def get_empty_indices(binary_spine_data_path, spine_data_stats_path):
+    binary_spine_data = open_data(binary_spine_data_path)
+
+    spine_data_stats = pd.read_csv(spine_data_stats_path)
+    spine_data_stats = spine_data_stats.sort(columns=['slice_idx'])
+
+    first_idx, last_idx = spine_data_stats.iloc[0]['slice_idx'], \
+                          spine_data_stats.iloc[-1]['slice_idx']
+
+    slices_range = np.arange(first_idx, last_idx + 1)
+
     print 'Find empty slices...'
     empty_indices = np.array([])
 
-    for i in np.arange(binary_spine_data.shape[0]):
-        print 'Slice %d/%d...' % (i, binary_spine_data.shape[0] - 1)
+    for i in slices_range:
+        if i % 100 == 0 or i == last_idx:
+            print 'Slice %d/%d...' % (i, last_idx)
+
         slice_data = binary_spine_data[i]
 
         if not np.count_nonzero(slice_data):
             empty_indices = np.append(empty_indices, i)
 
     return empty_indices
+
+
+def WRONG_get_empty_ranges(empty_indices):
+    output, grps = [], []
+
+    print empty_indices
+
+    for i, item in enumerate(empty_indices):
+        if i == (len(empty_indices) - 1):
+            grps.append((empty_indices[i], empty_indices[i]))
+        else:
+            grps.append((empty_indices[i], empty_indices[i+1]))
+
+    for grp in grps:
+        if (grp[0] + 1) != grp[1] and grp[0] != grp[1]:
+            output.append(np.arange(grp[0], grp[1] + 1))
+
+    return output
 
 def get_empty_ranges(empty_indices):
     print 'Get empty ranges...'
@@ -48,7 +80,8 @@ def get_empty_ranges(empty_indices):
     output = []
 
     for i, item in enumerate(empty_indices):
-        print 'Item %d/%d...' % (i, len(empty_indices) - 1)
+        if i % 100 == 0 or i == (len(empty_indices) - 1):
+            print 'Item %d/%d...' % (i, len(empty_indices) - 1)
 
         if i != (len(empty_indices) - 1):
             curr_item, next_item = item, empty_indices[i + 1]
@@ -66,6 +99,8 @@ def get_empty_ranges(empty_indices):
             stop_idx = empty_indices[i]
             output.append(np.arange(start_idx, stop_idx + 1))
 
+    print output
+
     return output
 
 def fill_emptiness(empty_ranges, binary_spine_data):
@@ -81,8 +116,9 @@ def fill_emptiness(empty_ranges, binary_spine_data):
         else:
             return 0
 
-    for rng in empty_ranges:
-        print 'Range [%d:%d]...' % (rng[0], rng[-1])
+    for i, rng in enumerate(empty_ranges):
+        if i % 10 == 0 or i == (len(empty_ranges) - 1):
+            print 'Range [%d:%d]...' % (rng[0], rng[-1])
 
         if check_range(rng) == 0:
             if len(rng) > 1:
@@ -100,8 +136,10 @@ def fill_emptiness(empty_ranges, binary_spine_data):
 
     return output
 
-def get_centroids_bboxes_border_labels(empty_ranges, binary_spine_data):
+def get_centroids_bboxes_border_labels(empty_ranges, disjointed_spine_labels_path):
     print 'Get centroinds of border labels...'
+    print empty_ranges
+    binary_spine_data = open_data(disjointed_spine_labels_path)
 
     output_centroids, output_bboxes = [], []
 
@@ -142,9 +180,10 @@ def get_centroids_bboxes_border_labels(empty_ranges, binary_spine_data):
 
     return output_centroids, output_bboxes
 
-def fit_fill_spine(empty_ranges, centroid_coords, label_bboxes, binary_spine_data):
+def fit_fill_spine(empty_ranges, centroid_coords, label_bboxes, disjointed_spine_labels_path):
     print 'Fit and fill spine...'
 
+    binary_spine_data = open_data(disjointed_spine_labels_path)
     output = binary_spine_data.copy()
 
     def extract_label(bbox, slice_idx, stack_data):
@@ -199,8 +238,10 @@ def fit_fill_spine(empty_ranges, centroid_coords, label_bboxes, binary_spine_dat
 
     return output
 
-def fit_fill_spine_trajectory(empty_ranges, centroid_coords, label_bboxes, binary_spine_data, traj_color=5):
+def fit_fill_spine_trajectory(empty_ranges, centroid_coords, label_bboxes, disjointed_spine_labels_path, traj_color=5):
     print 'Fit and fill spine trajectory...'
+
+    binary_spine_data = open_data(disjointed_spine_labels_path)
 
     output = binary_spine_data.copy()
 
@@ -273,46 +314,86 @@ def _segment_cirlces(rng, spine_data):
     spine_data_labeled = np.zeros_like(spine_data)
 
     for slice_idx in rng:
-        print 'Slice %d/%d' % (slice_idx + 1, spine_data.shape[0])
+        if slice_idx % 100 == 0 or slice_idx == (len(rng) - 1):
+            print 'Slice %d/%d' % (slice_idx, len(rng) - 1)
+
         spine_data_thresholded[slice_idx] = spine_data[slice_idx] >= threshold_otsu(spine_data[slice_idx])
-        spine_data_thresholded[slice_idx] = binary_closing(spine_data_thresholded[slice_idx], iterations=1)
+        #spine_data_thresholded[slice_idx] = binary_closing(spine_data_thresholded[slice_idx], iterations=1)
         #spine_data_thresholded[slice_idx] = denoise_bilateral(spine_data[slice_idx].astype(np.uint8), sigma_range=0.05, sigma_spatial=15)
         #spine_data_thresholded[slice_idx] = threshold_adaptive(spine_data_thresholded[slice_idx], block_size=19)
 
         #spine_data_thresholded[slice_idx] = binary_closing(spine_data_thresholded[slice_idx], iterations=1)
         #spine_data_thresholded[slice_idx] = median_filter(spine_data_thresholded[slice_idx], size=(3,3))
 
-        stats, labels = cell_counter(spine_data_thresholded[slice_idx], slice_index=slice_idx)
+        stats, labels = cell_counter(spine_data_thresholded[slice_idx], slice_index=slice_idx, debug=False)
         spine_data_labeled[slice_idx] = labels
 
         total_stats = total_stats.append(stats, ignore_index=True)
 
     return spine_data_labeled, total_stats
 
-def segment_spine_v2(spine_data, min_area=200.0, min_circularity=0.6, tolerance=5):
-    spine_data_thresholded, total_stats, init_stats = None, None, None
-    spine_data_labeled, spine_data_labeled_final = None, None
+def prepare_init_spine_data(input_data_path, input_data_label_path, z_offset_perc=2, z_length_perc=2):
+    input_data = open_data(input_data_path)
+    input_data_label = open_data(input_data_label_path)
 
-    stats_filepath = 'C:\\Users\\Administrator\\Documents\\AFS-Segmentation\\tests\\fish204_spine_labels.csv'
-    init_stats_filepath = 'C:\\Users\\Administrator\\Documents\\AFS-Segmentation\\tests\\fish204_spine_init_labels.csv'
-    labels_filepath = 'C:\\Users\\Administrator\\Documents\\AFS-Segmentation\\tests\\fish204_spine_labels_8bit_%dx%dx%d.raw' % (60, 207, 1220)
-    labels_nof_filepath = 'C:\\Users\\Administrator\\Documents\\AFS-Segmentation\\tests\\fish204_spine_labels_not_filtered_32bit_%dx%dx%d.raw' % (60, 207, 1220)
+    input_data_brain_label = extract_label_by_name(input_data_label, label_name='brain')
+    _, brain_bbox = extract_largest_volume_by_label(input_data, input_data_brain_label, bb_side_offset=0)
 
-    rng = np.arange(spine_data.shape[0])
+    brain_bbox_obj = BBox(brain_bbox, force_evenness=False)
+    print brain_bbox_obj
+    z_offset = int(np.ceil(brain_bbox_obj.depth * z_offset_perc / 100.))
+    z_length = int(np.ceil(brain_bbox_obj.depth * z_length_perc / 100.))
 
-    if not os.path.exists(init_stats_filepath):
-        _, init_stats = _segment_cirlces(rng[-2:], spine_data)
-        init_stats.to_csv(init_stats_filepath)
+    working_range = range(0, int(brain_bbox_obj.z) + z_offset + 1)
+
+    init_stats = pd.DataFrame()
+    for slice_idx in xrange(int(brain_bbox_obj.z) + z_offset, int(brain_bbox_obj.z) + z_offset + z_length + 1):
+        stats, labels = cell_counter(input_data_brain_label[slice_idx], slice_index=slice_idx)
+        init_stats = init_stats.append(stats, ignore_index=True)
+
+    return init_stats, working_range
+
+def segment_spine_v2(input_data_path, input_data_label_path, working_env, min_area=200.0, min_circularity=0.6, tolerance=5):
+    total_stats, init_stats = None, None
+    spine_data_labeled = None
+
+    spine_data = open_data(input_data_path)
+
+    stats_path = working_env.get_statistic_path('spine_labels_stats')
+    init_stats_path = working_env.get_statistic_path('spine_labels_init_stats')
+
+    labels_nof_niigz_path = \
+        working_env.get_new_volume_niigz_path(spine_data.shape, 'not_filtered_spine_labels')
+
+    working_range = None
+
+    if True:
+    #if not os.path.exists(stats_path):
+        # rng = np.arange(spine_data.shape[0])
+        #
+        # if not os.path.exists(init_stats_path):
+        #     _, init_stats = _segment_cirlces(rng[-2:], spine_data)
+        #     init_stats.to_csv(init_stats_path)
+        # else:
+        #     init_stats = pd.read_csv(init_stats_path)
+
+        init_stats, working_range = prepare_init_spine_data(input_data_path, input_data_label_path)
+        init_stats.to_csv(init_stats_path)
+
+        print init_stats
+        print 'working_range =[%d - %d]' % (working_range[0], working_range[len(working_range) - 1])
+
+        spine_data_labeled, total_stats = _segment_cirlces(working_range, spine_data)
+        print 'total_stats.shape = %s' % str(total_stats.shape)
+
+        total_stats.to_csv(stats_path)
+
+        if True:
+        # if not os.path.exists(labels_nof_niigz_path):
+            save_as_nifti(spine_data_labeled, labels_nof_niigz_path)
     else:
-        init_stats = pd.read_csv(init_stats_filepath)
-
-    if not os.path.exists(stats_filepath):
-        spine_data_labeled, total_stats = _segment_cirlces(rng, spine_data)
-        spine_data_labeled.tofile(labels_nof_filepath)
-        total_stats.to_csv(stats_filepath)
-    else:
-        total_stats = pd.read_csv(stats_filepath)
-        spine_data_labeled = open_data(labels_nof_filepath)
+        total_stats = pd.read_csv(stats_path)
+        spine_data_labeled = open_data(labels_nof_niigz_path)
 
     print "Stats filtering..."
     filtered_stats = total_stats[(total_stats['area'] > min_area) & (total_stats['circularity'] > min_circularity)]
@@ -320,38 +401,67 @@ def segment_spine_v2(spine_data, min_area=200.0, min_circularity=0.6, tolerance=
 
     filtered_init_stats = init_stats[(init_stats['area'] > min_area) & (init_stats['circularity'] > min_circularity)]
 
-    print "filtered_stats = %d" % filtered_stats.shape[0]
-    print "filtered_stats_neg = %d" % filtered_stats_neg.shape[0]
-    print "filtered_init_stats = %d" % filtered_init_stats.shape[0]
+    print "filtered_stats = %s" % str(filtered_stats.shape)
+    print "filtered_stats_neg = %s" % str(filtered_stats_neg.shape)
+    print "filtered_init_stats = %s" % str(filtered_init_stats.shape)
 
     print "Find spine in %d rows..." % filtered_init_stats.shape[0]
-    spines = []
+    # spines = []
+    # for idx, row in filtered_init_stats.iterrows():
+    #     spines.append(find_by_com(filtered_stats, spine_data.shape[0], row['com_y'], row['com_z']))
+
+    spine_stats = []
+    spine_lengths, spine_distances = np.array([]), np.array([])
     for idx, row in filtered_init_stats.iterrows():
-        spines.append(find_by_com(filtered_stats, spine_data.shape[0], row['com_y'], row['com_z']))
+        stats = find_by_com(filtered_stats, working_range, row['com_y'], row['com_z'], tolerance=tolerance)
 
-    print "Create labels..."
-    for i, spine_stats in enumerate(spines):
-        print "-----#%d %d circles are found...; dist(mean) = %f" % (i, spine_stats.shape[0], spine_stats['distance'].mean())
-        spine_data_labeled_final = np.zeros_like(spine_data_labeled)
+        if not stats.empty:
+            spine_stats.append(stats)
+            spine_lengths = np.append(spine_lengths, stats.shape[0])
+            spine_distances = np.append(spine_distances, stats['distance'].mean())
 
-        for idx, row in spine_stats.iterrows():
-            tmp_labels = spine_data_labeled[row['slice_idx']]
-            tmp_labels[tmp_labels != row['label']] = 0
-            tmp_labels[tmp_labels == row['label']] = 1
-            spine_data_labeled_final[row['slice_idx']] = tmp_labels
+    if not len(spine_lengths):
+        raise ValueError("Can't find spine crossections.")
 
-        spine_tmlp = 'C:\\Users\\Administrator\\Documents\\AFS-Segmentation\\tests\\fish204_spine_19Wlabels_%d_8bit_%dx%dx%d.raw' #fish204_aligned_32bit_60x207x1220
-        spine_data_labeled_final.tofile(spine_tmlp % (i, 60, 207, 1220))
-        init_stats.to_csv('C:\\Users\\Administrator\\Documents\\AFS-Segmentation\\tests\\fish204_spine_stats%d.csv' % i)
+    print 'spine_stats.len = %d' % len(spine_stats)
+    print 'spine_lengths.len = %d' % len(spine_lengths)
+    print 'spine_distances.len = %d' % len(spine_distances)
 
-@timing
-def find_by_com(stats, slices_num, init_com_y, init_com_z, tolerance=5):
+    #sort by length
+    length = len(spine_lengths)
+    indices_spine_lengths = np.argsort(spine_lengths)[::-1]
+    spine_lengths = spine_lengths[indices_spine_lengths]
+    spine_distances = spine_distances[indices_spine_lengths]
+
+    disjointed_spine_labels = np.zeros_like(spine_data_labeled)
+    disjointed_spine_stats = spine_stats[indices_spine_lengths[0]]
+
+    for idx, row in disjointed_spine_stats.iterrows():
+        tmp_labels = spine_data_labeled[row['slice_idx']]
+        tmp_labels[tmp_labels != row['label']] = 0
+        tmp_labels[tmp_labels == row['label']] = 1
+        disjointed_spine_labels[row['slice_idx']] = tmp_labels
+
+    disjointed_stats_path = working_env.get_statistic_path('disjointed_spine_stats')
+    disjointed_spine_labels_niigz_path = \
+            working_env.get_new_volume_niigz_path(disjointed_spine_labels.shape, 'disjointed_spine_labels')
+
+    if True:
+    #if not os.path.exists(disjointed_spine_labels_niigz_path):
+        save_as_nifti(disjointed_spine_labels, disjointed_spine_labels_niigz_path)
+
+    disjointed_spine_stats.to_csv(disjointed_stats_path)
+
+    return working_range, disjointed_stats_path, disjointed_spine_labels_niigz_path
+
+def find_by_com(stats, working_range, init_com_y, init_com_z, tolerance=5):
     print '#######Init (%f,%f)' % (init_com_y, init_com_z)
     spine_stats = pd.DataFrame()
 
     #for slice_idx in np.arange(slices_num)[::-1]:
-    for slice_idx in np.arange(slices_num)[::-1]:
-        print 'Slice %d/%d' % (slice_idx, slices_num)
+    for slice_idx in np.array(working_range)[::-1]:
+        if slice_idx % 100 == 0 or slice_idx == (len(working_range) - 1):
+            print 'Slice %d/%d' % (slice_idx, len(working_range) - 1)
 
         slice_stats = stats[stats['slice_idx'] == slice_idx]
 
@@ -494,7 +604,7 @@ def plot_spine_example2():
     #ax.set_zlabel('Z axis')
     #plt.show()
 
-def run_spine_segmentation(spine_path):
+def run_spine_segmentation(input_data_path, input_data_label_path, working_env, output_name, min_area=20.0, min_circularity=0.5, tolerance=5):
     '''
     Segments spine using circle detection and approximates
     the trajectory of spine on empty ranges with fitting polynom,
@@ -502,15 +612,50 @@ def run_spine_segmentation(spine_path):
     with neighbour spine slices.
     '''
 
-    spine_data = open_data(spine_path)
-    segmeneted_spine_brain_data = segment_spine_v2(spine_data, min_area=20.0, min_circularity=0.5)
+    try:
+        print '-- segment_spine_v2'
+        working_range, \
+        disjointed_stats_path, \
+        disjointed_spine_labels_niigz_path = \
+                        segment_spine_v2(input_data_path, \
+                                         input_data_label_path, \
+                                         working_env, \
+                                         min_area=min_area, \
+                                         min_circularity=min_circularity, \
+                                         tolerance=tolerance)
+        print '-- get_empty_indices'
+        empty_indices = get_empty_indices(disjointed_spine_labels_niigz_path, \
+                                          disjointed_stats_path)
 
-    empty_indices = get_empty_indices(segmeneted_spine_brain_data)
-    empty_ranges = get_empty_ranges(empty_indices)
-    label_centroids, label_bboxes = get_centroids_bboxes_border_labels(empty_ranges, segmeneted_spine_brain_data)
-    filled_spine_seg = fit_fill_spine_trajectory(empty_ranges, label_centroids, label_bboxes, segmeneted_spine_brain_data)
+        print '-- get_empty_ranges'
+        empty_ranges = get_empty_ranges(empty_indices)
 
-    return filled_spine_seg
+        print '-- get_centroids_bboxes_border_labels'
+        label_centroids, label_bboxes = \
+                    get_centroids_bboxes_border_labels(empty_ranges, \
+                                                       disjointed_spine_labels_niigz_path)
+
+        print '-- fit_fill_spine_trajectory'
+        filled_spine_label = \
+                    fit_fill_spine(empty_ranges, \
+                                   label_centroids, \
+                                   label_bboxes, \
+                                   disjointed_spine_labels_niigz_path)
+    except ValueError:
+        print "####################################################################################################"
+        print "########### Segmentation of spinal cords was failed due to lack of spine cross-sections. ###########"
+        print "####################################################################################################"
+        return None
+
+    filled_spine_label_niigz_path = \
+            working_env.get_new_volume_niigz_path(open_data(input_data_label_path).shape, \
+                    '_'.join([output_name, 'segmented', 'label']))
+
+    if True:
+    #if not os.path.exists(filled_spine_label_niigz_path):
+        save_as_nifti(filled_spine_label, filled_spine_label_niigz_path)
+
+    return filled_spine_label_niigz_path
 
 # def main():
 #     spine_path = 'C:\\Users\\Administrator\\Documents\\AFS-Segmentation\\tests\\fish204_spine_32bit_179x229x1667.raw'

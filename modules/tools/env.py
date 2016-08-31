@@ -40,6 +40,18 @@ class DataEnvironment(object):
         self.affineMatrix = '%sAffineMatrix.txt'
         self.invAffineMatrix = '%sInvAffineMatrix.txt'
 
+        self.envs['organs_envs'] = pickle.dumps(NoneDict())
+
+        self.envs['organs_labels'] = pickle.dumps(NoneDict())
+        self.envs['extracted_organs_labels'] = pickle.dumps(NoneDict())
+        self.envs['extracted_organs'] = pickle.dumps(NoneDict())
+        self.envs['extracted_organs_masked'] = pickle.dumps(NoneDict())
+        self.envs['extracted_organs_registration'] = pickle.dumps(NoneDict())
+        self.envs['extracted_organs_registration_labels'] = pickle.dumps(NoneDict())
+        self.envs['abdomen_separated_organs_labels'] = pickle.dumps(NoneDict())
+        self.envs['extracted_abdomen_part_separated_organs_labels'] = pickle.dumps(NoneDict())
+        self.envs['head_separated_organs_labels'] = pickle.dumps(NoneDict())
+
         self.ANTSPATH = "/home/rshkarin/ANKA_work/antsbin/bin"
         self.fish_num = fish_num
 
@@ -66,6 +78,67 @@ class DataEnvironment(object):
         else:
             return os.path.join(self.envs['project_temp_path'], \
                                 "env_%s.csv" % self.envs['filename_no_ext'])
+
+    def set_extracted_abdomen_part_separated_organs_labels(self, data):
+        self.envs['extracted_abdomen_part_separated_organs_labels'] = pickle.dumps(data)
+
+    def get_extracted_abdomen_part_separated_organs_labels(self):
+        return pickle.loads(self.envs['extracted_abdomen_part_separated_organs_labels'])
+
+    def set_abdomen_separated_organs_labels(self, data):
+        self.envs['abdomen_separated_organs_labels'] = pickle.dumps(data)
+
+    def get_abdomen_separated_organs_labels(self):
+        return pickle.loads(self.envs['abdomen_separated_organs_labels'])
+
+    def set_head_separated_organs_labels(self, data):
+        self.envs['head_separated_organs_labels'] = pickle.dumps(data)
+
+    def get_head_separated_organs_labels(self):
+        return pickle.loads(self.envs['head_separated_organs_labels'])
+
+    def set_extracted_organs_registration_labels(self, data):
+        self.envs['extracted_organs_registration_labels'] = pickle.dumps(data)
+
+    def get_extracted_organs_registration_labels(self):
+        return pickle.loads(self.envs['extracted_organs_registration_labels'])
+
+    def set_extracted_organs_registration(self, data):
+        self.envs['extracted_organs_registration'] = pickle.dumps(data)
+
+    def get_extracted_organs_registration(self):
+        return pickle.loads(self.envs['extracted_organs_registration'])
+
+    def set_extracted_organs_masked(self, data):
+        self.envs['extracted_organs_masked'] = pickle.dumps(data)
+
+    def get_extracted_organs_masked(self):
+        return pickle.loads(self.envs['extracted_organs_masked'])
+
+    def set_extracted_organs(self, data):
+        self.envs['extracted_organs'] = pickle.dumps(data)
+
+    def get_extracted_organs(self):
+        return pickle.loads(self.envs['extracted_organs'])
+
+    def set_extracted_organs_labels(self, data):
+        self.envs['extracted_organs_labels'] = pickle.dumps(data)
+
+    def get_extracted_organs_labels(self):
+        return pickle.loads(self.envs['extracted_organs_labels'])
+
+
+    def set_organs_labels(self, data):
+        self.envs['organs_labels'] = pickle.dumps(data)
+
+    def get_organs_labels(self):
+        return pickle.loads(self.envs['organs_labels'])
+
+    def set_organs_envs(self, data):
+        self.envs['organs_envs'] = pickle.dumps(data)
+
+    def get_organs_envs(self):
+        return pickle.loads(self.envs['organs_envs'])
 
     def get_working_path(self):
         return self.envs['project_temp_path']
