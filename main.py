@@ -208,7 +208,7 @@ def _build_fish_data_paths():
 def clean_version_run_brain_segmentation_unix():
     fishes_envs = _build_fish_data_paths()
 
-    print 'PEW PEW PEW FIST LAUNCH OF AUTO-BRAIN SEGMENTATION!'
+    print 'LAUNCH OF AUTO-BRAIN SEGMENTATION!'
     for fish_env in fishes_envs:
         print '############################# Fish %d ###################################' % fish_env.fish_num
         print fish_env
