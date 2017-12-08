@@ -1,5 +1,7 @@
 # Automatic Fish Segmentation (AFS)
 
+[![DOI](https://zenodo.org/badge/113559427.svg)](https://zenodo.org/badge/latestdoi/113559427)
+
 AFS is a Python 2.7 application for automated segmentation of medaka fish.
 
 ## Features
