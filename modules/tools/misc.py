@@ -8,8 +8,7 @@ else:
     import wmi
 
 class BBox(object):
-    def __init__(self, *args, **kwargs):
-        _input = args[0]
+    def __init__(self, _input, force_evenness=True):
         self.is2DBox = False
 
         if isinstance(_input, dict) and (('bb_x' not in _input) or ('bb_width' not in _input)):
@@ -40,15 +39,16 @@ class BBox(object):
                 self.x = _input['bb_x']
                 self.width = _input['bb_width']
 
-        self.y = self._force_evenness(self.y)
-        self.z = self._force_evenness(self.z)
+        if force_evenness:
+            self.y = self._force_evenness(self.y)
+            self.z = self._force_evenness(self.z)
 
-        self.height = self._force_evenness(self.height)
-        self.depth = self._force_evenness(self.depth)
+            self.height = self._force_evenness(self.height)
+            self.depth = self._force_evenness(self.depth)
 
-        if not self.is2DBox:
-            self.x = self._force_evenness(self.x)
-            self.width = self._force_evenness(self.width)
+            if not self.is2DBox:
+                self.x = self._force_evenness(self.x)
+                self.width = self._force_evenness(self.width)
 
     def _force_evenness(self, value):
         return (value - 1) if value % 2 != 0 else value
@@ -58,36 +58,47 @@ class BBox(object):
         y_start, y_end = None, None
         x_start, x_end = None, None
 
-        if max_ranges:
-            z_max, y_max, x_max = max_ranges
+        frac_offset = offset/100.
 
-            z_start, z_end = self.z if (self.z - offset) < 0 else (self.z - offset), \
-                              z_max if (self.z + self.depth + offset) > z_max else \
-                                        (self.z + self.depth + offset)
-            y_start, y_end = self.y if (self.y - offset) < 0 else (self.y - offset), \
-                              y_max if (self.y + self.height + offset) > y_max else \
-                                        (self.y + self.height + offset)
+        max_dim = max([self.depth, self.height]) if self.is2DBox else max([self.depth, self.height, self.width])
+
+        offset_dim = max_dim * frac_offset
+
+        z_max, y_max, x_max = None, None, None
+
+        if max_ranges:
+            if not self.is2DBox:
+                z_max, y_max, x_max = max_ranges
+            else:
+                z_max, y_max = max_ranges
+
+            z_start, z_end = self.z if (self.z - offset_dim) < 0 else (self.z - offset_dim), \
+                              z_max if (self.z + self.depth + offset_dim) > z_max else \
+                                        (self.z + self.depth + offset_dim)
+            y_start, y_end = self.y if (self.y - offset_dim) < 0 else (self.y - offset_dim), \
+                              y_max if (self.y + self.height + offset_dim) > y_max else \
+                                        (self.y + self.height + offset_dim)
 
             if not self.is2DBox:
-                x_start, x_end = self.x if (self.x - offset) < 0 else (self.x - offset), \
-                                  x_max if (self.x + self.width + offset) > x_max else \
-                                            (self.x + self.width + offset)
+                x_start, x_end = self.x if (self.x - offset_dim) < 0 else (self.x - offset_dim), \
+                                  x_max if (self.x + self.width + offset_dim) > x_max else \
+                                            (self.x + self.width + offset_dim)
         else:
             if force_positiveness:
-                z_start, z_end = self.z if (self.z - offset) < 0 else (self.z - offset), \
-                                  self.z + self.depth + offset
-                y_start, y_end = self.y if (self.y - offset) < 0 else (self.y - offset), \
-                                  self.y + self.height + offset
+                z_start, z_end = self.z if (self.z - offset_dim) < 0 else (self.z - offset_dim), \
+                                  self.z + self.depth + offset_dim
+                y_start, y_end = self.y if (self.y - offset_dim) < 0 else (self.y - offset_dim), \
+                                  self.y + self.height + offset_dim
 
                 if not self.is2DBox:
-                    x_start, x_end = self.x if (self.x - offset) < 0 else (self.x - offset), \
-                                      self.x + self.width + offset
+                    x_start, x_end = self.x if (self.x - offset_dim) < 0 else (self.x - offset_dim), \
+                                      self.x + self.width + offset_dim
             else:
-                z_start, z_end = self.z - offset, self.z + self.depth + offset
-                y_start, y_end = self.y - offset, self.y + self.height + offset
+                z_start, z_end = self.z - offset_dim, self.z + self.depth + offset_dim
+                y_start, y_end = self.y - offset_dim, self.y + self.height + offset_dim
 
                 if not self.is2DBox:
-                    x_start, x_end = self.x - offset, self.x + self.width + offset
+                    x_start, x_end = self.x - offset_dim, self.x + self.width + offset_dim
 
         z_start, z_end = self._force_evenness(z_start), self._force_evenness(z_end)
         y_start, y_end = self._force_evenness(y_start), self._force_evenness(y_end)

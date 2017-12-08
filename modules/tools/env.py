@@ -8,7 +8,7 @@ class NoneDict(dict):
         return dict.get(self, key, '')
 
 class DataEnvironment(object):
-    def __init__(self, project_path, input_filepath):
+    def __init__(self, project_path, input_filepath, fish_num):
         self.envs = NoneDict()
         self.envs['project_path'] = project_path
 
@@ -16,10 +16,12 @@ class DataEnvironment(object):
             os.makedirs(self.envs['project_path'])
 
         self.envs['input_data_path'] = input_filepath
+        self.envs['input_aligned_data_path'] = None
         self.envs['target_data_path'] = None
         self.envs['input_data_labels_path'] = None
+        self.envs['input_aligned_data_labels_path'] = None
         self.envs['input_data_spine_labels_path'] = None
-        
+
         self.envs['filename_ext'] = os.path.basename(input_filepath)
         self.envs['filename_no_ext'] = os.path.splitext(os.path.basename(input_filepath))[0]
 
@@ -38,7 +40,20 @@ class DataEnvironment(object):
         self.affineMatrix = '%sAffineMatrix.txt'
         self.invAffineMatrix = '%sInvAffineMatrix.txt'
 
+        self.envs['organs_envs'] = pickle.dumps(NoneDict())
+
+        self.envs['organs_labels'] = pickle.dumps(NoneDict())
+        self.envs['extracted_organs_labels'] = pickle.dumps(NoneDict())
+        self.envs['extracted_organs'] = pickle.dumps(NoneDict())
+        self.envs['extracted_organs_masked'] = pickle.dumps(NoneDict())
+        self.envs['extracted_organs_registration'] = pickle.dumps(NoneDict())
+        self.envs['extracted_organs_registration_labels'] = pickle.dumps(NoneDict())
+        self.envs['abdomen_separated_organs_labels'] = pickle.dumps(NoneDict())
+        self.envs['extracted_abdomen_part_separated_organs_labels'] = pickle.dumps(NoneDict())
+        self.envs['head_separated_organs_labels'] = pickle.dumps(NoneDict())
+
         self.ANTSPATH = "/home/rshkarin/ANKA_work/antsbin/bin"
+        self.fish_num = fish_num
 
     def save(self):
         w = csv.writer(open(self._get_cache_path(), "w"))
@@ -63,6 +78,67 @@ class DataEnvironment(object):
         else:
             return os.path.join(self.envs['project_temp_path'], \
                                 "env_%s.csv" % self.envs['filename_no_ext'])
+
+    def set_extracted_abdomen_part_separated_organs_labels(self, data):
+        self.envs['extracted_abdomen_part_separated_organs_labels'] = pickle.dumps(data)
+
+    def get_extracted_abdomen_part_separated_organs_labels(self):
+        return pickle.loads(self.envs['extracted_abdomen_part_separated_organs_labels'])
+
+    def set_abdomen_separated_organs_labels(self, data):
+        self.envs['abdomen_separated_organs_labels'] = pickle.dumps(data)
+
+    def get_abdomen_separated_organs_labels(self):
+        return pickle.loads(self.envs['abdomen_separated_organs_labels'])
+
+    def set_head_separated_organs_labels(self, data):
+        self.envs['head_separated_organs_labels'] = pickle.dumps(data)
+
+    def get_head_separated_organs_labels(self):
+        return pickle.loads(self.envs['head_separated_organs_labels'])
+
+    def set_extracted_organs_registration_labels(self, data):
+        self.envs['extracted_organs_registration_labels'] = pickle.dumps(data)
+
+    def get_extracted_organs_registration_labels(self):
+        return pickle.loads(self.envs['extracted_organs_registration_labels'])
+
+    def set_extracted_organs_registration(self, data):
+        self.envs['extracted_organs_registration'] = pickle.dumps(data)
+
+    def get_extracted_organs_registration(self):
+        return pickle.loads(self.envs['extracted_organs_registration'])
+
+    def set_extracted_organs_masked(self, data):
+        self.envs['extracted_organs_masked'] = pickle.dumps(data)
+
+    def get_extracted_organs_masked(self):
+        return pickle.loads(self.envs['extracted_organs_masked'])
+
+    def set_extracted_organs(self, data):
+        self.envs['extracted_organs'] = pickle.dumps(data)
+
+    def get_extracted_organs(self):
+        return pickle.loads(self.envs['extracted_organs'])
+
+    def set_extracted_organs_labels(self, data):
+        self.envs['extracted_organs_labels'] = pickle.dumps(data)
+
+    def get_extracted_organs_labels(self):
+        return pickle.loads(self.envs['extracted_organs_labels'])
+
+
+    def set_organs_labels(self, data):
+        self.envs['organs_labels'] = pickle.dumps(data)
+
+    def get_organs_labels(self):
+        return pickle.loads(self.envs['organs_labels'])
+
+    def set_organs_envs(self, data):
+        self.envs['organs_envs'] = pickle.dumps(data)
+
+    def get_organs_envs(self):
+        return pickle.loads(self.envs['organs_envs'])
 
     def get_working_path(self):
         return self.envs['project_temp_path']
@@ -99,6 +175,18 @@ class DataEnvironment(object):
 
     def get_input_spine_labels_path(self):
         return self.envs['input_data_spine_labels_path']
+
+    def set_input_align_data_path(self, filepath):
+        self.envs['input_aligned_data_path'] = filepath
+
+    def get_input_align_data_path(self):
+        return self.envs['input_aligned_data_path']
+
+    def set_input_aligned_data_labels_path(self, filepath):
+        self.envs['input_aligned_data_labels_path'] = filepath
+
+    def get_input_aligned_data_labels_path(self):
+        return self.envs['input_aligned_data_labels_path']
 
     def _get_ants_output_names(self, fixed_image_name, fixed_image_size, moving_image_name, moving_image_size, phase_name):
         final_name = '%s_%s_%sTO%s_%s' % (phase_name, moving_image_name, moving_image_size, fixed_image_name, fixed_image_size)
@@ -245,16 +333,3 @@ class DataEnvironment(object):
                             '%s_statistics_%s.csv' % (prefix, name))
 
         return self.envs['input_data_%s_statistics' % prefix]
-
-    def test_paths(self):
-        self.set_target_data_path("C:\\Users\\Administrator\\Documents\\ProcessedMedaka\\fish204\\fish204_32bit_621x621x1800.raw")
-        print self.get_working_path()
-        print self.get_input_path()
-        print self.get_target_path()
-        print self.get_new_volume_niigz_path((320,320,1000), 'extracted_zoomed_0p5')
-        print self.get_new_volume_path((1000,320,320), 'extracted_zoomed_0p5')
-        print self.get_new_volume_labels_niigz_path((320,320,1000), 'extracted')
-        print self.get_new_volume_labels_path((1000,320,320), 'extracted')
-        print self.get_head_abdomen_volume_paths((300,300,300), (500,500,500))
-        print self.get_aligned_data_paths("FISH_SEPARATION")
-        print self.get_statistic_path("eyes")
